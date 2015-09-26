@@ -356,6 +356,8 @@ func printExpr(e ast.Expr, buf *bytes.Buffer, indent string, ctx *LibraryContext
 		buf.WriteString("new ")
 		printExpr(et.Type, buf, "", ctx)
 		buf.WriteString("(")
+		// TODO: How to deal with construction of []rune from a string
+		// If array type we should be adding [] around the parameters being passed in.
 		for idx, subExp := range et.Elts {
 			printExpr(subExp, buf, "", ctx)
 			if idx < len(et.Elts)-1 {
@@ -428,7 +430,6 @@ func printExpr(e ast.Expr, buf *bytes.Buffer, indent string, ctx *LibraryContext
 		// buf.WriteString("[")
 		// buf.WriteString("]")
 	case *ast.ArrayType:
-		// TODO: How to deal with construction of []rune from a string
 		buf.WriteString("ListSlice")
 	case *ast.SliceExpr:
 		printExpr(et.X, buf, "", ctx)
