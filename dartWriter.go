@@ -29,6 +29,8 @@ var typesMap = map[string]string{
 	"uint32":  "int",
 	"uint64":  "int",
 	"byte":    "int",
+	"rune":    "int",
+	"nil":     "null",
 }
 
 var tokenMap = map[token.Token]string{
@@ -68,6 +70,7 @@ type LibraryContext struct {
 	Name        string
 	Indentation string
 	Class       *ClassContext
+	NextIota    int
 }
 
 // ClassContext lets you pass around class specific values
@@ -157,7 +160,11 @@ class ListSlice {
   int end = 0;
   int length = 0;
 
-  ListSlice(List this.source, [this.start = 0, this.end = 0]) {
+  ListSlice([List this.source, this.start = 0, this.end = 0]) {
+    if (this.source == null) {
+      this.source = new List();
+    }
+
     if (start == end && source.length > 0) {
       end = source.length;
     }
@@ -206,11 +213,22 @@ class ListSlice {
 		Indentation: "",
 		Class:       nil,
 	}
+	for _, v := range lib.Vars {
+		printDecl(v, buf, "", ctx)
+		buf.WriteString(";\n")
+		ctx.NextIota = 0
+	}
+	for _, f := range lib.FuncTypes {
+		printDecl(f, buf, "", ctx)
+		buf.WriteString(";\n")
+	}
 	for _, c := range lib.Classes {
 		printClass(c, buf, ctx)
+		buf.WriteString("\n")
 	}
 	for _, f := range lib.Funcs {
 		printFunc(f, buf, "", ctx)
+		buf.WriteString("\n")
 	}
 	return buf.Bytes()
 }
@@ -266,7 +284,7 @@ func printClass(cl *dart.Class, buf *bytes.Buffer, ctx *LibraryContext) {
 			buf.WriteString("\n")
 		}
 	}
-	buf.WriteString("}\n\n")
+	buf.WriteString("}\n")
 }
 
 func printFunc(f *ast.FuncDecl, buf *bytes.Buffer, indent string, ctx *LibraryContext) {
@@ -318,10 +336,13 @@ func printExpr(e ast.Expr, buf *bytes.Buffer, indent string, ctx *LibraryContext
 		//buf.WriteString("*") // TODO: Dart pointer vs struct?
 		printExpr(et.X, buf, "", ctx)
 	case *ast.Ident:
-		if et.Obj != nil && et.Obj.Decl == ctx.Class.RecvDecl {
+		if et.Obj != nil && ctx.Class != nil && et.Obj.Decl == ctx.Class.RecvDecl {
 			buf.WriteString("this")
 		} else if tv, ok := typesMap[et.Name]; ok {
 			buf.WriteString(tv)
+		} else if et.Name == "iota" {
+			buf.WriteString(strconv.Itoa(ctx.NextIota))
+			ctx.NextIota++
 		} else {
 			buf.WriteString(et.Name)
 		}
@@ -399,6 +420,7 @@ func printExpr(e ast.Expr, buf *bytes.Buffer, indent string, ctx *LibraryContext
 		buf.WriteString(")")
 	case *ast.IndexExpr:
 		// TODO: Is this the expr for accessing values in a map?
+		// TODO: check out if we have a map, if so use the [],if slice use the .elementAt() function.
 		printExpr(et.X, buf, "", ctx)
 		buf.WriteString(".elementAt(")
 		printExpr(et.Index, buf, "", ctx)
@@ -406,6 +428,7 @@ func printExpr(e ast.Expr, buf *bytes.Buffer, indent string, ctx *LibraryContext
 		// buf.WriteString("[")
 		// buf.WriteString("]")
 	case *ast.ArrayType:
+		// TODO: How to deal with construction of []rune from a string
 		buf.WriteString("ListSlice")
 	case *ast.SliceExpr:
 		printExpr(et.X, buf, "", ctx)
@@ -417,7 +440,9 @@ func printExpr(e ast.Expr, buf *bytes.Buffer, indent string, ctx *LibraryContext
 	case *ast.MapType:
 		buf.WriteString("Map")
 	case *ast.InterfaceType:
-		buf.WriteString("abstract")
+		buf.WriteString("interface")
+	case *ast.TypeAssertExpr:
+		// We don't handle this here at all!
 	case nil:
 		// Do nothing i guess?
 	default:
@@ -544,17 +569,42 @@ func printStmt(e ast.Stmt, buf *bytes.Buffer, indent string, ctx *LibraryContext
 
 func printAssignStmt(st *ast.AssignStmt, buf *bytes.Buffer, indent string, ctx *LibraryContext) {
 	if len(st.Lhs) > 1 && len(st.Rhs) == 1 {
+		isAssign := st.Tok == token.DEFINE
+
 		switch ms := st.Rhs[0].(type) {
+		case *ast.TypeAssertExpr:
+			if isAssign {
+				buf.WriteString("var ")
+			}
+			printExpr(st.Lhs[1], buf, "", ctx)
+			buf.WriteString(" = ")
+			printExpr(ms.X, buf, "", ctx)
+			buf.WriteString(" is ")
+			printExpr(ms.Type, buf, "", ctx)
+			buf.WriteString(";\n")
+
+			buf.WriteString(indent)
+			if isAssign {
+				buf.WriteString("var ")
+			}
+			printExpr(st.Lhs[0], buf, "", ctx)
+			buf.WriteString(" = ")
+			printExpr(ms.X, buf, "", ctx)
 		case *ast.IndexExpr:
 			// Probably a map?
-			buf.WriteString("var ")
+			if isAssign {
+				buf.WriteString("var ")
+			}
 			printExpr(st.Lhs[1], buf, "", ctx)
 			buf.WriteString(" = ")
 			printExpr(ms.X, buf, "", ctx)
 			buf.WriteString(".containsKey(")
 			printExpr(ms.Index, buf, "", ctx)
 			buf.WriteString(");\n")
-			buf.WriteString(indent + "var ")
+			buf.WriteString(indent)
+			if isAssign {
+				buf.WriteString("var ")
+			}
 			printExpr(st.Lhs[0], buf, "", ctx)
 			buf.WriteString(" = ")
 			printExpr(ms.X, buf, "", ctx)
@@ -562,11 +612,6 @@ func printAssignStmt(st *ast.AssignStmt, buf *bytes.Buffer, indent string, ctx *
 			printExpr(ms.Index, buf, "", ctx)
 			buf.WriteString("]")
 		case *ast.CallExpr:
-			// funSource := msource.Fun.(*ast.Ident)
-			// ft := funSource.Obj.Decl.(*ast.FuncType)
-			// for _, fr := range ft.Results.List {
-			// 	fr.
-			// }
 			buf.WriteString("var tmpList ")
 			buf.WriteString(tokenMap[st.Tok])
 			buf.WriteString(" ")
@@ -574,6 +619,9 @@ func printAssignStmt(st *ast.AssignStmt, buf *bytes.Buffer, indent string, ctx *
 			buf.WriteString(";\n")
 			for idx, lh := range st.Lhs {
 				buf.WriteString(indent)
+				if isAssign {
+					buf.WriteString("var ")
+				}
 				printExpr(lh, buf, "", ctx)
 				buf.WriteString(" = tmpList[")
 				buf.WriteString(strconv.Itoa(idx))
@@ -614,14 +662,19 @@ func printAssignStmt(st *ast.AssignStmt, buf *bytes.Buffer, indent string, ctx *
 						//   We would need to create an add inside of an add.
 						continue
 					} else if ident.Name == "make" {
+						printExpr(lh, buf, "", ctx)
+						buf.WriteString(tokenMap[st.Tok])
 						buf.WriteString("new ")
 						printExpr(rhTyped.Args[0], buf, "", ctx)
 						buf.WriteString("()")
+						continue
 					}
 				}
 			}
 			printExpr(lh, buf, "", ctx)
+			buf.WriteString(" ")
 			buf.WriteString(tokenMap[st.Tok])
+			buf.WriteString(" ")
 			printExpr(st.Rhs[idx], buf, "", ctx)
 
 			if idx < len(st.Lhs)-1 {
@@ -693,10 +746,28 @@ func printDecl(d ast.Decl, buf *bytes.Buffer, indent string, ctx *LibraryContext
 				}
 			}
 		case token.VAR, token.CONST:
-			buf.WriteString("var ")
-			for _, s := range dt.Specs {
+			var lastVal *ast.ValueSpec
+			for sIdx, s := range dt.Specs {
 				ts := s.(*ast.ValueSpec)
-				buf.WriteString(ts.Names[0].Name)
+				for nIdx, n := range ts.Names {
+					buf.WriteString("var ")
+					buf.WriteString(n.Name)
+					buf.WriteString(" = ")
+					if len(ts.Values) > nIdx {
+						printExpr(ts.Values[nIdx], buf, "", ctx)
+						lastVal = ts
+					} else if lastVal != nil {
+						printExpr(lastVal.Values[len(lastVal.Values)-1], buf, "", ctx)
+					} else {
+						buf.WriteString("null")
+					}
+					if nIdx < len(ts.Names)-1 {
+						buf.WriteString(";\n")
+					}
+				}
+				if sIdx < len(dt.Specs)-1 {
+					buf.WriteString(";\n")
+				}
 			}
 		default:
 			fmt.Printf("Unknown token in gen decl: %s", dt.Tok)
