@@ -11,9 +11,8 @@ import (
 	"github.com/lologarithm/gopherDart/dart"
 )
 
-// TODO: Context needs to be passed down instead of just indent.
-//   Example: We need to know types of fields on classes
-//   Example: We need to be able to pass down a func recv name so we can sub in 'this' where needed.
+//  TODO: Make indent part of the context so that we can have 'correct' indentation.
+//        One thing is to separate indentation level with how much indentation to draw with any single call.
 
 // this is probably wrong...
 var typesMap = map[string]string{
@@ -131,6 +130,8 @@ func LoadToLibrary(f *ast.File, lib *dart.Library) string {
 						lib.Classes[ts.Name.Name].Fields = tsType.Fields.List
 					case *ast.FuncType:
 						lib.FuncTypes = append(lib.FuncTypes, d)
+					case *ast.InterfaceType:
+						lib.Interfaces = append(lib.Interfaces, d)
 					default:
 						fmt.Printf("Unknown type lib declaration: %s, %v\n", reflect.TypeOf(ts.Type), ts.Type)
 					}
@@ -201,8 +202,14 @@ class ListSlice {
 
   void add(element) {
     source.add(element);
-	end++;
-	length++;
+    end++;
+    length++;
+  }
+
+  void copy(src) {
+    this.source = new List.from(src);
+	this.start = 0;
+	this.end = this.source.length;
   }
 }
 
@@ -218,14 +225,22 @@ class ListSlice {
 		buf.WriteString(";\n")
 		ctx.NextIota = 0
 	}
+	buf.WriteString("\n")
 	for _, f := range lib.FuncTypes {
 		printDecl(f, buf, "", ctx)
 		buf.WriteString(";\n")
 	}
+	buf.WriteString("\n")
+	for _, f := range lib.Interfaces {
+		printDecl(f, buf, "", ctx)
+		buf.WriteString("\n")
+	}
+	buf.WriteString("\n")
 	for _, c := range lib.Classes {
 		printClass(c, buf, ctx)
 		buf.WriteString("\n")
 	}
+	buf.WriteString("\n")
 	for _, f := range lib.Funcs {
 		printFunc(f, buf, "", ctx)
 		buf.WriteString("\n")
@@ -301,7 +316,12 @@ func printFunc(f *ast.FuncDecl, buf *bytes.Buffer, indent string, ctx *LibraryCo
 		buf.WriteString(" ")
 	}
 
-	buf.WriteString(f.Name.Name)
+	if f.Name.Name == "String" {
+		// Specially handle the go 'String' function to the dart equivolent.
+		buf.WriteString("toString")
+	} else {
+		buf.WriteString(f.Name.Name)
+	}
 	buf.WriteString("(")
 	printParams(f.Type.Params, buf, "", ctx)
 	buf.WriteString(") {\n")
@@ -370,7 +390,14 @@ func printExpr(e ast.Expr, buf *bytes.Buffer, indent string, ctx *LibraryContext
 		buf.WriteString(":")
 		printExpr(et.Value, buf, "", ctx)
 	case *ast.BasicLit:
-		buf.WriteString(et.Value)
+		if et.Kind == token.STRING && et.Value[0] == '`' {
+			// Make sure we replace any go string literals
+			buf.WriteString("\"")
+			buf.WriteString(et.Value[1 : len(et.Value)-1])
+			buf.WriteString("\"")
+		} else {
+			buf.WriteString(et.Value)
+		}
 	case *ast.BinaryExpr:
 		printExpr(et.X, buf, "", ctx)
 		buf.WriteString(" ")
@@ -386,8 +413,24 @@ func printExpr(e ast.Expr, buf *bytes.Buffer, indent string, ctx *LibraryContext
 		if ok {
 			if ident.Name == "len" {
 				printExpr(et.Args[0], buf, "", ctx)
-				buf.WriteString(".length()")
+				buf.WriteString(".length")
 				break
+			} else if ident.Name == "copy" {
+				printExpr(et.Args[0], buf, "", ctx)
+				buf.WriteString(".copy(")
+				printExpr(et.Args[1], buf, "", ctx)
+				buf.WriteString(")")
+				break
+			} else if ident.Name == "String" {
+				// Handle the conversion of function 'String' to 'toString'
+				buf.WriteString("toString(")
+				for idx, arg := range et.Args {
+					printExpr(arg, buf, "", ctx)
+					if idx < len(et.Args)-1 {
+						buf.WriteString(", ")
+					}
+				}
+				buf.WriteString(")")
 			}
 		}
 		doCont := false
@@ -502,13 +545,17 @@ func printStmt(e ast.Stmt, buf *bytes.Buffer, indent string, ctx *LibraryContext
 		}
 		buf.WriteString("\n")
 	case *ast.ForStmt:
-		buf.WriteString("for (")
-		printStmt(st.Init, buf, "", ctx)
-		buf.WriteString(";")
-		printExpr(st.Cond, buf, "", ctx)
-		buf.WriteString(";")
-		printStmt(st.Post, buf, "", ctx)
-		buf.WriteString(") {\n")
+		if st.Init == nil && st.Cond == nil && st.Post == nil {
+			buf.WriteString("while (true) {\n")
+		} else {
+			buf.WriteString("for (")
+			printStmt(st.Init, buf, "", ctx)
+			buf.WriteString(";")
+			printExpr(st.Cond, buf, "", ctx)
+			buf.WriteString(";")
+			printStmt(st.Post, buf, "", ctx)
+			buf.WriteString(") {\n")
+		}
 		for _, stmt := range st.Body.List {
 			printStmt(stmt, buf, indent+"  ", ctx)
 		}
@@ -700,7 +747,7 @@ func printRangeStmt(r *ast.RangeStmt, buf *bytes.Buffer, indent string, ctx *Lib
 	printExpr(r.Key, buf, "", ctx)
 	buf.WriteString(" < ")
 	printExpr(r.X, buf, "", ctx)
-	buf.WriteString(".length(); ")
+	buf.WriteString(".length; ")
 	printExpr(r.Key, buf, "", ctx)
 	buf.WriteString("++) {\n")
 	buf.WriteString(indent + "  ")
@@ -742,6 +789,11 @@ func printDecl(d ast.Decl, buf *bytes.Buffer, indent string, ctx *LibraryContext
 					buf.WriteString("(")
 					printParams(tsType.Params, buf, "", ctx)
 					buf.WriteString(")")
+				case *ast.InterfaceType:
+					buf.WriteString("abstract class ")
+					printExpr(ts.Name, buf, "", ctx)
+					buf.WriteString("{\n")
+					buf.WriteString("}")
 				default:
 					fmt.Printf("Unknown type in generic declaration printing: %s\n", reflect.TypeOf(ts.Type))
 				}
