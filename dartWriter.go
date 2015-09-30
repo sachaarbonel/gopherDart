@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"reflect"
 	"strconv"
+	"strings"
 
 	"github.com/lologarithm/gopherDart/dart"
 )
@@ -393,7 +394,8 @@ func printExpr(e ast.Expr, buf *bytes.Buffer, indent string, ctx *LibraryContext
 		if et.Kind == token.STRING && et.Value[0] == '`' {
 			// Make sure we replace any go string literals
 			buf.WriteString("\"")
-			buf.WriteString(et.Value[1 : len(et.Value)-1])
+			// Sub instances of " with \"
+			buf.WriteString(strings.Replace(et.Value[1:len(et.Value)-1], "\"", "\\\"", -1))
 			buf.WriteString("\"")
 		} else {
 			buf.WriteString(et.Value)
