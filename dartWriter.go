@@ -432,7 +432,14 @@ func printStmt(e ast.Stmt, buf *bytes.Buffer, indent string, ctx *LibraryContext
 		if st.Else != nil {
 			buf.WriteString(" else ")
 			// TODO: if Else isn't another 'if' we need to add { }
-			printStmt(st.Else, buf, indent, ctx)
+			switch st.Else.(type) {
+			case *ast.IfStmt:
+				printStmt(st.Else, buf, indent, ctx)
+			default:
+				buf.WriteString("{")
+				printStmt(st.Else, buf, indent, ctx)
+				buf.WriteString("}")
+			}
 		}
 		buf.WriteString("\n")
 	case *ast.ForStmt:
