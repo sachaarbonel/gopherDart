@@ -20,11 +20,19 @@ func TestIf(t *testing.T) {
 		Class:       nil,
 	}
 	stmt := &ast.IfStmt{
-		Init: nil,
+		Init: &ast.AssignStmt{
+			Lhs: []ast.Expr{&ast.BasicLit{Value: "x"}},
+			Tok: token.DEFINE,
+			Rhs: []ast.Expr{&ast.BasicLit{Value: "1"}},
+		},
 		Cond: &ast.BinaryExpr{
-			X:  &ast.BasicLit{},
+			X: &ast.BasicLit{
+				Value: "x",
+			},
 			Op: token.EQL,
-			Y:  &ast.BasicLit{},
+			Y: &ast.BasicLit{
+				Value: "1",
+			},
 		},
 		Body: &ast.BlockStmt{},
 		Else: &ast.BlockStmt{}, // else branch; or nil

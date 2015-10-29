@@ -421,6 +421,13 @@ func printStmt(e ast.Stmt, buf *bytes.Buffer, indent string, ctx *LibraryContext
 	case *ast.AssignStmt:
 		printAssignStmt(st, buf, indent, ctx)
 	case *ast.IfStmt:
+		if st.Init != nil {
+			// TODO: This doesn't correctly scope the variables defined here.
+			// Perhaps the entire if could just be inside of an 'if (true)' block?
+			printStmt(st.Init, buf, indent, ctx)
+			buf.WriteString(";\n")
+			buf.WriteString(indent)
+		}
 		buf.WriteString("if (")
 		printExpr(st.Cond, buf, "", ctx)
 		buf.WriteString(") {\n")
@@ -617,6 +624,7 @@ func printAssignStmt(st *ast.AssignStmt, buf *bytes.Buffer, indent string, ctx *
 					}
 				}
 			}
+			// Default is to print the left, token, right, newline if there are more assignments.
 			printExpr(lh, buf, "", ctx)
 			buf.WriteString(" ")
 			buf.WriteString(tokenMap[st.Tok])
@@ -630,6 +638,7 @@ func printAssignStmt(st *ast.AssignStmt, buf *bytes.Buffer, indent string, ctx *
 	} else {
 		fmt.Printf("Assign statement with more elements on the right hand side than left!? %v", st.Tok)
 	}
+	// no indent means that this expression is part of another stmt. If it is indented then we need to add a newline.
 	if indent != "" {
 		buf.WriteString(";\n")
 	}
