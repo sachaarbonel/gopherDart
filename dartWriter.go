@@ -15,56 +15,6 @@ import (
 //  TODO: Make indent part of the context so that we can have 'correct' indentation.
 //        One thing is to separate indentation level with how much indentation to draw with any single call.
 
-// this is probably wrong...
-var typesMap = map[string]string{
-	"string":  "String",
-	"float64": "double",
-	"float32": "double",
-	"int":     "int",
-	"int16":   "int",
-	"int32":   "int",
-	"int64":   "int",
-	"uint":    "int",
-	"uint16":  "int",
-	"uint32":  "int",
-	"uint64":  "int",
-	"byte":    "int",
-	"rune":    "int",
-	"nil":     "null",
-}
-
-var tokenMap = map[token.Token]string{
-	token.ADD:        "+",
-	token.ADD_ASSIGN: "+=",
-	token.AND:        "&",
-	token.AND_ASSIGN: "&=",
-	token.AND_NOT:    "&!",
-	token.ARROW:      "->",
-	token.ASSIGN:     "=",
-	token.BREAK:      "break",
-	token.CASE:       "case",
-	token.CHAN:       "chan",
-	token.CHAR:       "String",
-	token.COLON:      ":",
-	token.CONTINUE:   "continue",
-	token.DEC:        "--",
-	token.DEFINE:     "=",
-	token.EQL:        "==",
-	token.GEQ:        ">=",
-	token.GTR:        ">",
-	token.INC:        "++",
-	token.LAND:       "&&",
-	token.LEQ:        "<=",
-	token.LSS:        "<",
-	token.LOR:        "||",
-	token.MUL:        "*",
-	token.NEQ:        "!=",
-	token.NOT:        "!",
-	token.OR:         "|",
-	token.SUB:        "-",
-	token.SUB_ASSIGN: "-=",
-}
-
 // LibraryContext lets you pass around values that span the library.
 type LibraryContext struct {
 	Name        string
@@ -155,66 +105,7 @@ func Print(lib *dart.Library) []byte {
 	buf.WriteString(lib.Name)
 	buf.WriteString(";")
 	buf.WriteString("\n\n")
-	buf.WriteString(`// ListSlice is the emulator for go slices in dart.
-class ListSlice {
-  List source;
-  int start = 0;
-  int end = 0;
-  int length = 0;
-
-  ListSlice([List this.source, this.start = 0, this.end = 0]) {
-    if (this.source == null) {
-      this.source = new List();
-    }
-
-    if (start == end && source.length > 0) {
-      end = source.length;
-    }
-    length = end - start;
-  }
-
-  ListSlice slice(int subStart, int subEnd) {
-    return new ListSlice(source, start + subStart, start + subEnd);
-  }
-
-  dynamic elementAt(int index) {
-    int sourceIndex = start + index;
-    if (sourceIndex < start || sourceIndex >= end || sourceIndex < 0 || sourceIndex >= source.length) {
-      return null;
-    }
-    return source[sourceIndex];
-  }
-
-  setAt(int index, val) {
-    int sourceIndex = start + index;
-    if (sourceIndex < start || sourceIndex >= end || sourceIndex < 0 || sourceIndex >= source.length) {
-      return; // throw?
-    }
-    source[sourceIndex] = val;
-  }
-
-  String toString() {
-    String result = "";
-    for (int i = start; i < end; i++) {
-      result += source[i].toString();
-    }
-    return result;
-  }
-
-  void add(element) {
-    source.add(element);
-    end++;
-    length++;
-  }
-
-  void copy(src) {
-    this.source = new List.from(src);
-	this.start = 0;
-	this.end = this.source.length;
-  }
-}
-
-`)
+	buf.WriteString(sliceHeader) // Write the slice class at start of dart file.
 
 	ctx := &LibraryContext{
 		Name:        lib.Name,
@@ -532,6 +423,13 @@ func printStmt(e ast.Stmt, buf *bytes.Buffer, indent string, ctx *LibraryContext
 	case *ast.AssignStmt:
 		printAssignStmt(st, buf, indent, ctx)
 	case *ast.IfStmt:
+		if st.Init != nil {
+			// TODO: This doesn't correctly scope the variables defined here.
+			// Perhaps the entire if could just be inside of an 'if (true)' block?
+			printStmt(st.Init, buf, indent, ctx)
+			buf.WriteString(";\n")
+			buf.WriteString(indent)
+		}
 		buf.WriteString("if (")
 		printExpr(st.Cond, buf, "", ctx)
 		buf.WriteString(") {\n")
@@ -542,8 +440,14 @@ func printStmt(e ast.Stmt, buf *bytes.Buffer, indent string, ctx *LibraryContext
 		buf.WriteString("}")
 		if st.Else != nil {
 			buf.WriteString(" else ")
-			// TODO: if Else isn't another 'if' we need to add { }
-			printStmt(st.Else, buf, indent, ctx)
+			switch st.Else.(type) {
+			case *ast.IfStmt:
+				printStmt(st.Else, buf, indent, ctx)
+			default:
+				buf.WriteString("{")
+				printStmt(st.Else, buf, indent, ctx)
+				buf.WriteString("}")
+			}
 		}
 		buf.WriteString("\n")
 	case *ast.ForStmt:
@@ -687,14 +591,24 @@ func printAssignStmt(st *ast.AssignStmt, buf *bytes.Buffer, indent string, ctx *
 				buf.WriteString("var ")
 			}
 			// Handle assigning to index here
-			switch lhTyped := st.Lhs[idx].(type) {
-			case *ast.IndexExpr:
-				printExpr(lhTyped.X, buf, "", ctx)
-				buf.WriteString(".setAt(")
-				printExpr(lhTyped.Index, buf, "", ctx)
-				buf.WriteString(",")
-				printExpr(st.Rhs[idx], buf, "", ctx)
-				buf.WriteString(")")
+			lhTyped, ok := st.Lhs[idx].(*ast.IndexExpr)
+			if ok {
+				// If we have an index expr we need to specially handle
+				// choosing between map and std array expressions.
+				if isMapIndex(lhTyped) {
+					printExpr(lhTyped.X, buf, "", ctx)
+					buf.WriteString("[")
+					printExpr(lhTyped.Index, buf, "", ctx)
+					buf.WriteString("] = ")
+					printExpr(st.Rhs[idx], buf, "", ctx)
+				} else {
+					printExpr(lhTyped.X, buf, "", ctx)
+					buf.WriteString(".setAt(")
+					printExpr(lhTyped.Index, buf, "", ctx)
+					buf.WriteString(",")
+					printExpr(st.Rhs[idx], buf, "", ctx)
+					buf.WriteString(")")
+				}
 				continue
 			}
 			// If assign rhs is func 'append' we specially handle it.
@@ -721,6 +635,7 @@ func printAssignStmt(st *ast.AssignStmt, buf *bytes.Buffer, indent string, ctx *
 					}
 				}
 			}
+			// Default is to print the left, token, right, newline if there are more assignments.
 			printExpr(lh, buf, "", ctx)
 			buf.WriteString(" ")
 			buf.WriteString(tokenMap[st.Tok])
@@ -734,9 +649,29 @@ func printAssignStmt(st *ast.AssignStmt, buf *bytes.Buffer, indent string, ctx *
 	} else {
 		fmt.Printf("Assign statement with more elements on the right hand side than left!? %v", st.Tok)
 	}
+	// no indent means that this expression is part of another stmt. If it is indented then we need to add a newline.
 	if indent != "" {
 		buf.WriteString(";\n")
 	}
+}
+
+func isMapIndex(lhTyped *ast.IndexExpr) bool {
+	typX, ok := lhTyped.X.(*ast.Ident)
+	if ok {
+		decX, ok := typX.Obj.Decl.(*ast.AssignStmt)
+		if ok {
+			for _, rh := range decX.Rhs {
+				complt, ok := rh.(*ast.CompositeLit)
+				if ok {
+					_, ok := complt.Type.(*ast.MapType)
+					if ok {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
 }
 
 func printRangeStmt(r *ast.RangeStmt, buf *bytes.Buffer, indent string, ctx *LibraryContext) {
