@@ -438,7 +438,6 @@ func printStmt(e ast.Stmt, buf *bytes.Buffer, indent string, ctx *LibraryContext
 		buf.WriteString("}")
 		if st.Else != nil {
 			buf.WriteString(" else ")
-			// TODO: if Else isn't another 'if' we need to add { }
 			switch st.Else.(type) {
 			case *ast.IfStmt:
 				printStmt(st.Else, buf, indent, ctx)
@@ -590,14 +589,24 @@ func printAssignStmt(st *ast.AssignStmt, buf *bytes.Buffer, indent string, ctx *
 				buf.WriteString("var ")
 			}
 			// Handle assigning to index here
-			switch lhTyped := st.Lhs[idx].(type) {
-			case *ast.IndexExpr:
-				printExpr(lhTyped.X, buf, "", ctx)
-				buf.WriteString(".setAt(")
-				printExpr(lhTyped.Index, buf, "", ctx)
-				buf.WriteString(",")
-				printExpr(st.Rhs[idx], buf, "", ctx)
-				buf.WriteString(")")
+			lhTyped, ok := st.Lhs[idx].(*ast.IndexExpr)
+			if ok {
+				// If we have an index expr we need to specially handle
+				// choosing between map and std array expressions.
+				if isMapIndex(lhTyped) {
+					printExpr(lhTyped.X, buf, "", ctx)
+					buf.WriteString("[")
+					printExpr(lhTyped.Index, buf, "", ctx)
+					buf.WriteString("] = ")
+					printExpr(st.Rhs[idx], buf, "", ctx)
+				} else {
+					printExpr(lhTyped.X, buf, "", ctx)
+					buf.WriteString(".setAt(")
+					printExpr(lhTyped.Index, buf, "", ctx)
+					buf.WriteString(",")
+					printExpr(st.Rhs[idx], buf, "", ctx)
+					buf.WriteString(")")
+				}
 				continue
 			}
 			// If assign rhs is func 'append' we specially handle it.
@@ -642,6 +651,25 @@ func printAssignStmt(st *ast.AssignStmt, buf *bytes.Buffer, indent string, ctx *
 	if indent != "" {
 		buf.WriteString(";\n")
 	}
+}
+
+func isMapIndex(lhTyped *ast.IndexExpr) bool {
+	typX, ok := lhTyped.X.(*ast.Ident)
+	if ok {
+		decX, ok := typX.Obj.Decl.(*ast.AssignStmt)
+		if ok {
+			for _, rh := range decX.Rhs {
+				complt, ok := rh.(*ast.CompositeLit)
+				if ok {
+					_, ok := complt.Type.(*ast.MapType)
+					if ok {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
 }
 
 func printRangeStmt(r *ast.RangeStmt, buf *bytes.Buffer, indent string, ctx *LibraryContext) {

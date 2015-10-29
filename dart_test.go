@@ -21,13 +21,13 @@ func TestIf(t *testing.T) {
 	}
 	stmt := &ast.IfStmt{
 		Init: &ast.AssignStmt{
-			Lhs: []ast.Expr{&ast.BasicLit{Value: "x"}},
+			Lhs: []ast.Expr{&ast.Ident{Name: "x"}},
 			Tok: token.DEFINE,
 			Rhs: []ast.Expr{&ast.BasicLit{Value: "1"}},
 		},
 		Cond: &ast.BinaryExpr{
-			X: &ast.BasicLit{
-				Value: "x",
+			X: &ast.Ident{
+				Name: "x",
 			},
 			Op: token.EQL,
 			Y: &ast.BasicLit{
