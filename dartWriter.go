@@ -535,51 +535,46 @@ func printStmt(e ast.Stmt, buf *bytes.Buffer, indent string, ctx *LibraryContext
 		var lhs_var string
 		a, ok := assign.(*ast.AssignStmt)
 		if ok {
-			lhs, ok := a.Lhs[0].(*ast.Ident)
-			if ok { //should I even do this check?
-				lhs_var = lhs.Name
-			} else {
-				//uhhh, shouldn't happen
-			}
-			rhs, ok := a.Rhs[0].(*ast.TypeAssertExpr)
-			if ok {
-				buf.WriteString(lhs_var + " = ")
-				printExpr(rhs.X, buf, "", ctx)
-				buf.WriteString(";\n")
-				for i, stmt := range st.Body.List {
-					clause, ok := stmt.(*ast.CaseClause)
-					if ok {
-						if len(clause.List) > 0 {
-							_, ok := clause.List[0].(*ast.StarExpr)
-							if ok { //or this check?
-								if i > 0 {
-									buf.WriteString(indent + "else if (")
-								} else {
-									buf.WriteString(indent + "if (")
-								}
-								for i, cc := range clause.List {
-									ccstr, ok := cc.(*ast.StarExpr)
-									if ok { //or this check?
-										buf.WriteString(lhs_var + " is ")
-										printExpr(ccstr, buf, "", ctx)
-									}
-									if i < len(clause.List)-1 {
-										buf.WriteString(" || ")
-									}
-								}
-								buf.WriteString(") {\n ")
+			lhs, _ := a.Lhs[0].(*ast.Ident)
+			lhs_var = lhs.Name
+
+			rhs, _ := a.Rhs[0].(*ast.TypeAssertExpr)
+			buf.WriteString(lhs_var + " = ")
+			printExpr(rhs.X, buf, "", ctx)
+			buf.WriteString(";\n")
+			for i, stmt := range st.Body.List {
+				clause, ok := stmt.(*ast.CaseClause)
+				if ok {
+					if len(clause.List) > 0 {
+						_, ok := clause.List[0].(*ast.StarExpr)
+						if ok {
+							if i > 0 {
+								buf.WriteString(indent + "else if (")
+							} else {
+								buf.WriteString(indent + "if (")
 							}
+							for i, cc := range clause.List {
+								ccstr, ok := cc.(*ast.StarExpr)
+								if ok { //or this check?
+									buf.WriteString(lhs_var + " is ")
+									printExpr(ccstr, buf, "", ctx)
+								}
+								if i < len(clause.List)-1 {
+									buf.WriteString(" || ")
+								}
+							}
+							buf.WriteString(") {\n ")
 						} else {
-							buf.WriteString(indent + "else {\n")
+							//Idk why this else exists, do I only support type switches on pointers? //TODO
 						}
+					} else {
+						buf.WriteString(indent + "else {\n")
 					}
-					for _, stmt := range clause.Body {
-						printStmt(stmt, buf, indent+"  ", ctx)
-					}
-					buf.WriteString(indent + "}\n")
 				}
-			} else {
-				fmt.Println("Something went wrong.")
+				for _, stmt := range clause.Body {
+					printStmt(stmt, buf, indent+"  ", ctx)
+				}
+				buf.WriteString(indent + "}\n")
 			}
 		}
 	case nil, *ast.EmptyStmt:
@@ -614,7 +609,7 @@ func printAssignStmt(st *ast.AssignStmt, buf *bytes.Buffer, indent string, ctx *
 			printExpr(st.Lhs[0], buf, "", ctx)
 			buf.WriteString(" = ")
 			printExpr(ms.X, buf, "", ctx)
-		case *ast.IndexExpr:
+		case *ast.IndexExpr: //TODO
 			// Probably a map?
 			if isAssign {
 				buf.WriteString("var ")
@@ -780,8 +775,6 @@ func printRangeStmt(r *ast.RangeStmt, buf *bytes.Buffer, indent string, ctx *Lib
 		buf.WriteString(indent)
 		buf.WriteString("}\n")
 	case *types.Map:
-		//TODO
-		//Use ForEach function
 		printExpr(r.X, buf, indent, ctx)
 		buf.WriteString(".forEach( (")
 		printExpr(r.Key, buf, "", ctx)
