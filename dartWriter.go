@@ -3,17 +3,14 @@ package main
 import (
 	"bytes"
 	"fmt"
+	//"github.com/lologarithm/gopherDart/structs"
 	"go/ast"
 	"go/token"
+	"golang.org/x/tools/go/types"
 	"reflect"
 	"strconv"
 	"strings"
-
-	"github.com/lologarithm/gopherDart/dart"
 )
-
-//  TODO: Make indent part of the context so that we can have 'correct' indentation.
-//        One thing is to separate indentation level with how much indentation to draw with any single call.
 
 // LibraryContext lets you pass around values that span the library.
 type LibraryContext struct {
@@ -32,10 +29,13 @@ type ClassContext struct {
 	Fields map[string]string // Fields maps a field name in the class to its type.
 }
 
+var info *types.Info
+
 // LoadToLibrary accepts an AST of a go file and adds it to the library passed in.
 // Due to go file structure we have to first group up functions wih structs before printing.
-func LoadToLibrary(f *ast.File, lib *dart.Library) string {
+func LoadToLibrary(f *ast.File, lib *Library, tinfo *types.Info) string {
 	lib.Name = f.Name.Name
+	info = tinfo
 	for _, decl := range f.Decls {
 		switch d := decl.(type) {
 		case *ast.FuncDecl:
@@ -50,7 +50,7 @@ func LoadToLibrary(f *ast.File, lib *dart.Library) string {
 							fmt.Printf("Function %s receiver X incorrect type!?", d.Name.Name)
 						}
 						if _, ok := lib.Classes[id.Name]; !ok {
-							lib.Classes[id.Name] = &dart.Class{
+							lib.Classes[id.Name] = &Class{
 								Name:    id.Name,
 								Fields:  []*ast.Field{},
 								Methods: []*ast.FuncDecl{},
@@ -72,7 +72,7 @@ func LoadToLibrary(f *ast.File, lib *dart.Library) string {
 					switch tsType := ts.Type.(type) {
 					case *ast.StructType:
 						if _, ok := lib.Classes[ts.Name.Name]; !ok {
-							lib.Classes[ts.Name.Name] = &dart.Class{
+							lib.Classes[ts.Name.Name] = &Class{
 								Name:    ts.Name.Name,
 								Fields:  []*ast.Field{},
 								Methods: []*ast.FuncDecl{},
@@ -91,6 +91,7 @@ func LoadToLibrary(f *ast.File, lib *dart.Library) string {
 				lib.Vars = append(lib.Vars, d)
 			}
 		default:
+			report(d)
 			fmt.Printf("Other declaration in file? %s, %v", reflect.TypeOf(d), d)
 		}
 	}
@@ -99,7 +100,7 @@ func LoadToLibrary(f *ast.File, lib *dart.Library) string {
 }
 
 // Print returns the string representation of this library
-func Print(lib *dart.Library) []byte {
+func Print(lib *Library) []byte {
 	buf := &bytes.Buffer{}
 	buf.WriteString("library ")
 	buf.WriteString(lib.Name)
@@ -140,7 +141,7 @@ func Print(lib *dart.Library) []byte {
 	return buf.Bytes()
 }
 
-func printClass(cl *dart.Class, buf *bytes.Buffer, ctx *LibraryContext) {
+func printClass(cl *Class, buf *bytes.Buffer, ctx *LibraryContext) {
 	buf.WriteString("class ")
 	buf.WriteString(cl.Name)
 	buf.WriteString(" {")
@@ -357,14 +358,26 @@ func printExpr(e ast.Expr, buf *bytes.Buffer, indent string, ctx *LibraryContext
 		printExpr(et.X, buf, "", ctx)
 		buf.WriteString(")")
 	case *ast.IndexExpr:
-		// TODO: Is this the expr for accessing values in a map?
-		// TODO: check out if we have a map, if so use the [],if slice use the .elementAt() function.
-		printExpr(et.X, buf, "", ctx)
-		buf.WriteString(".elementAt(")
-		printExpr(et.Index, buf, "", ctx)
-		buf.WriteString(")")
-		// buf.WriteString("[")
-		// buf.WriteString("]")
+		var idt *ast.Ident
+		switch rhs := et.X.(type) {
+		case *ast.SelectorExpr:
+			idt = rhs.Sel
+		case *ast.Ident:
+			idt = rhs
+		}
+		ty := info.Uses[idt].Type()
+		switch ty.(type) {
+		case *types.Slice:
+			printExpr(et.X, buf, "", ctx)
+			buf.WriteString(".elementAt(")
+			printExpr(et.Index, buf, "", ctx)
+			buf.WriteString(")")
+		case *types.Map:
+			printExpr(et.X, buf, "", ctx)
+			buf.WriteString("[")
+			printExpr(et.Index, buf, "", ctx)
+			buf.WriteString("]")
+		}
 	case *ast.ArrayType:
 		buf.WriteString("ListSlice")
 	case *ast.SliceExpr:
@@ -383,6 +396,7 @@ func printExpr(e ast.Expr, buf *bytes.Buffer, indent string, ctx *LibraryContext
 	case nil:
 		// Do nothing i guess?
 	default:
+		report(e)
 		fmt.Printf("%sUnknown expr type: %s\n", indent, reflect.TypeOf(e))
 	}
 }
@@ -427,6 +441,7 @@ func printStmt(e ast.Stmt, buf *bytes.Buffer, indent string, ctx *LibraryContext
 			// TODO: This doesn't correctly scope the variables defined here.
 			// Perhaps the entire if could just be inside of an 'if (true)' block?
 			printStmt(st.Init, buf, indent, ctx)
+
 			buf.WriteString(";\n")
 			buf.WriteString(indent)
 		}
@@ -437,16 +452,17 @@ func printStmt(e ast.Stmt, buf *bytes.Buffer, indent string, ctx *LibraryContext
 			printStmt(subStmt, buf, indent+"  ", ctx)
 		}
 		buf.WriteString(indent)
-		buf.WriteString("}")
+		buf.WriteString("}\n")
 		if st.Else != nil {
-			buf.WriteString(" else ")
+			buf.WriteString(indent + "else")
 			switch st.Else.(type) {
 			case *ast.IfStmt:
+				buf.WriteString("\n")
 				printStmt(st.Else, buf, indent, ctx)
 			default:
-				buf.WriteString("{")
+				buf.WriteString(" {\n")
 				printStmt(st.Else, buf, indent, ctx)
-				buf.WriteString("}")
+				buf.WriteString(indent + "}")
 			}
 		}
 		buf.WriteString("\n")
@@ -514,9 +530,58 @@ func printStmt(e ast.Stmt, buf *bytes.Buffer, indent string, ctx *LibraryContext
 		for _, stmt := range st.List {
 			printStmt(stmt, buf, indent, ctx)
 		}
+	case *ast.TypeSwitchStmt:
+		assign := st.Assign
+		var lhs_var string
+		a, ok := assign.(*ast.AssignStmt)
+		if ok {
+			lhs, _ := a.Lhs[0].(*ast.Ident)
+			lhs_var = lhs.Name
+
+			rhs, _ := a.Rhs[0].(*ast.TypeAssertExpr)
+			buf.WriteString(lhs_var + " = ")
+			printExpr(rhs.X, buf, "", ctx)
+			buf.WriteString(";\n")
+			for i, stmt := range st.Body.List {
+				clause, ok := stmt.(*ast.CaseClause)
+				if ok {
+					if len(clause.List) > 0 {
+						_, ok := clause.List[0].(*ast.StarExpr)
+						if ok {
+							if i > 0 {
+								buf.WriteString(indent + "else if (")
+							} else {
+								buf.WriteString(indent + "if (")
+							}
+							for i, cc := range clause.List {
+								ccstr, ok := cc.(*ast.StarExpr)
+								if ok { //or this check?
+									buf.WriteString(lhs_var + " is ")
+									printExpr(ccstr, buf, "", ctx)
+								}
+								if i < len(clause.List)-1 {
+									buf.WriteString(" || ")
+								}
+							}
+							buf.WriteString(") {\n ")
+						} else {
+							//Idk why this else exists, do I only support type switches on pointers? //TODO
+						}
+					} else {
+						buf.WriteString(indent + "else {\n")
+					}
+				}
+				for _, stmt := range clause.Body {
+					printStmt(stmt, buf, indent+"  ", ctx)
+				}
+				buf.WriteString(indent + "}\n")
+			}
+		}
 	case nil, *ast.EmptyStmt:
 		// Do nothing?
+
 	default:
+		report(e)
 		fmt.Printf("%sUnhandled function statement: %v\n", indent, reflect.TypeOf(e))
 	}
 }
@@ -544,7 +609,7 @@ func printAssignStmt(st *ast.AssignStmt, buf *bytes.Buffer, indent string, ctx *
 			printExpr(st.Lhs[0], buf, "", ctx)
 			buf.WriteString(" = ")
 			printExpr(ms.X, buf, "", ctx)
-		case *ast.IndexExpr:
+		case *ast.IndexExpr: //TODO
 			// Probably a map?
 			if isAssign {
 				buf.WriteString("var ")
@@ -582,7 +647,8 @@ func printAssignStmt(st *ast.AssignStmt, buf *bytes.Buffer, indent string, ctx *
 				buf.WriteString("];\n")
 			}
 		default:
-			fmt.Printf("Unknown multi-assign from type: %s\n", reflect.TypeOf(st.Rhs[0]))
+			report(st)
+			//fmt.Printf("Unknown multi-assign from type: %s\n", reflect.TypeOf(st.Rhs[0]))
 		}
 		// Unpack all returns from Rhs into Lhs
 	} else if len(st.Lhs) == len(st.Rhs) {
@@ -595,6 +661,7 @@ func printAssignStmt(st *ast.AssignStmt, buf *bytes.Buffer, indent string, ctx *
 			if ok {
 				// If we have an index expr we need to specially handle
 				// choosing between map and std array expressions.
+				//TODO does not appear to determine if is Map correctly.
 				if isMapIndex(lhTyped) {
 					printExpr(lhTyped.X, buf, "", ctx)
 					buf.WriteString("[")
@@ -641,7 +708,6 @@ func printAssignStmt(st *ast.AssignStmt, buf *bytes.Buffer, indent string, ctx *
 			buf.WriteString(tokenMap[st.Tok])
 			buf.WriteString(" ")
 			printExpr(st.Rhs[idx], buf, "", ctx)
-
 			if idx < len(st.Lhs)-1 {
 				buf.WriteString(";\n")
 			}
@@ -675,31 +741,53 @@ func isMapIndex(lhTyped *ast.IndexExpr) bool {
 }
 
 func printRangeStmt(r *ast.RangeStmt, buf *bytes.Buffer, indent string, ctx *LibraryContext) {
-	// TODO: Figure out if you are ranging
-	// over a map, slice, channel
-
-	buf.WriteString("for (int ")
-	printExpr(r.Key, buf, "", ctx)
-	buf.WriteString(" = 0; ")
-	printExpr(r.Key, buf, "", ctx)
-	buf.WriteString(" < ")
-	printExpr(r.X, buf, "", ctx)
-	buf.WriteString(".length; ")
-	printExpr(r.Key, buf, "", ctx)
-	buf.WriteString("++) {\n")
-	buf.WriteString(indent + "  ")
-	buf.WriteString("var ")
-	printExpr(r.Value, buf, "", ctx)
-	buf.WriteString(" = ")
-	printExpr(r.X, buf, "", ctx)
-	buf.WriteString("[")
-	printExpr(r.Key, buf, "", ctx)
-	buf.WriteString("];\n")
-	for _, stmt := range r.Body.List {
-		printStmt(stmt, buf, indent+"  ", ctx)
+	var idt *ast.Ident
+	switch rhs := r.X.(type) {
+	case *ast.SelectorExpr:
+		idt = rhs.Sel
+	case *ast.Ident:
+		idt = rhs
 	}
-	buf.WriteString(indent)
-	buf.WriteString("}\n")
+
+	ty := info.Uses[idt].Type()
+	switch ty.(type) {
+	case *types.Slice:
+		buf.WriteString("for (int ")
+		printExpr(r.Key, buf, "", ctx)
+		buf.WriteString(" = 0; ")
+		printExpr(r.Key, buf, "", ctx)
+		buf.WriteString(" < ")
+		printExpr(r.X, buf, "", ctx)
+		buf.WriteString(".length; ")
+		printExpr(r.Key, buf, "", ctx)
+		buf.WriteString("++) {\n")
+		buf.WriteString(indent + "  ")
+		buf.WriteString("var ")
+		printExpr(r.Value, buf, "", ctx)
+		buf.WriteString(" = ")
+		printExpr(r.X, buf, "", ctx)
+		buf.WriteString("[")
+		printExpr(r.Key, buf, "", ctx)
+		buf.WriteString("];\n")
+		for _, stmt := range r.Body.List {
+			printStmt(stmt, buf, indent+"  ", ctx)
+		}
+		buf.WriteString(indent)
+		buf.WriteString("}\n")
+	case *types.Map:
+		printExpr(r.X, buf, indent, ctx)
+		buf.WriteString(".forEach( (")
+		printExpr(r.Key, buf, "", ctx)
+		buf.WriteString(", ")
+		printExpr(r.Value, buf, "", ctx)
+		buf.WriteString(") => ")
+		printStmt(r.Body, buf, "", ctx)
+		buf.WriteString(" );\n")
+
+	case *types.Chan:
+		report(r)
+	}
+
 }
 
 func printDecl(d ast.Decl, buf *bytes.Buffer, indent string, ctx *LibraryContext) {
@@ -760,9 +848,25 @@ func printDecl(d ast.Decl, buf *bytes.Buffer, indent string, ctx *LibraryContext
 				}
 			}
 		default:
-			fmt.Printf("Unknown token in gen decl: %s", dt.Tok)
+			report(d)
 		}
 	default:
-		fmt.Printf("%sUnhandled declaration: %v\n", indent, reflect.TypeOf(d))
+		report(d)
 	}
+}
+
+func testFunc() {
+	var foo int
+	foo = 7
+	bar := 12
+
+	arr := make(map[int]int, 5)
+	arr[1] = 1
+	arr[2] = 3
+
+	arr[1] = foo
+	arr[2] = bar
+
+	foo, bar = bar, foo
+	fmt.Println(arr[1])
 }

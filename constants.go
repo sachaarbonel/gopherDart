@@ -112,3 +112,7 @@ this.end = this.source.length;
 }
 
 `
+
+var getTypeName = `getTypeName(dynamic obj) {
+  return reflect(obj).type.reflectedType.toString();
+}`
