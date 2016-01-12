@@ -11,6 +11,12 @@ To Run
 ./gopherDart /path/to/go/package
 ```
 
+##Goal
+Take our go, serverside, code and transpile it into dart that can be run client side. 
+Basically GopherJs, except with Dart.
+
+
+
 ## Supported
 
 * Generated code looks like it works :thumbsup:
@@ -19,17 +25,23 @@ To Run
     * Outputs empty files for most Go builtin packages, due to transpilation failures.
 * 
 
-## Unsupported
+## Todo
 
-* goroutines
 * defer
 * recover
 * Various control statements
+* support for go standard libraries
+
+## Maybe todo
 * First class functions
 * Function pointers
-* no support for go standard libraries
 
-## Status
+## Unsupported (and not todo) 
+* goroutines
 
-* Untested
-* 
+## In progress
+
+* Working on dependency resolution
+* Alex is learning Dart
+* Starting real testing.
+
