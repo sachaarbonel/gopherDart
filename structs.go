@@ -1,6 +1,9 @@
 package main
 
-import "go/ast"
+import (
+	"go/ast"
+	"golang.org/x/tools/go/types"
+)
 
 // Library represents a collection of classes, variables, and functions.
 type Library struct {
@@ -10,6 +13,7 @@ type Library struct {
 	FuncTypes  []*ast.GenDecl
 	Funcs      []*ast.FuncDecl
 	Vars       []*ast.GenDecl
+	Types      *types.Info
 }
 
 func NewLibrary() *Library {
@@ -19,6 +23,7 @@ func NewLibrary() *Library {
 		Interfaces: []*ast.GenDecl{},
 		Funcs:      []*ast.FuncDecl{},
 		Vars:       []*ast.GenDecl{},
+		Types:      nil,
 	}
 }
 

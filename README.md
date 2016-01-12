@@ -11,19 +11,25 @@ To Run
 ./gopherDart /path/to/go/package
 ```
 
-For now it generates a file 'lib.dart' that contains the entire Go package in a single dart library.
+## Supported
 
-In Progress
+* Generated code looks like it works :thumbsup:
+* Very preliminary dependency resolution
+    * Recursive transpilation.
+    * Outputs empty files for most Go builtin packages, due to transpilation failures.
+* 
 
-  1. Go slice support via dart class 'ListSlice' to emulate go slice behavior.
-  2. Working on making Go interfaces into dart abstract classes.
-  3. Finish 'else' cases in if/elseif/else groups.
+## Unsupported
 
-Future TODO:
+* goroutines
+* defer
+* recover
+* Various control statements
+* First class functions
+* Function pointers
+* no support for go standard libraries
 
-  1. Use Streams in place of channels
-  2. Read in imports and parse them
-  3. Decide what standard packages should be hand made in dart vs translated.
-  4. TypedArray vs normal list slice for number types.
-  5. Figure out range statements for map and channel types.
-  6. Use a future async function for 'go' commands.
+## Status
+
+* Untested
+* 

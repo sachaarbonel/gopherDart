@@ -5,8 +5,13 @@ import (
 	"fmt"
 	//"github.com/lologarithm/gopherDart/structs"
 	"go/ast"
+	"go/parser"
 	"go/token"
+	_ "golang.org/x/tools/go/gcimporter"
 	"golang.org/x/tools/go/types"
+	"io/ioutil"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
@@ -18,6 +23,7 @@ type LibraryContext struct {
 	Indentation string
 	Class       *ClassContext
 	NextIota    int
+	Types       *types.Info
 }
 
 // ClassContext lets you pass around class specific values
@@ -29,13 +35,11 @@ type ClassContext struct {
 	Fields map[string]string // Fields maps a field name in the class to its type.
 }
 
-var info *types.Info
-
 // LoadToLibrary accepts an AST of a go file and adds it to the library passed in.
 // Due to go file structure we have to first group up functions wih structs before printing.
-func LoadToLibrary(f *ast.File, lib *Library, tinfo *types.Info) string {
+func LoadToLibrary(f *ast.File, lib *Library) string {
+
 	lib.Name = f.Name.Name
-	info = tinfo
 	for _, decl := range f.Decls {
 		switch d := decl.(type) {
 		case *ast.FuncDecl:
@@ -112,6 +116,7 @@ func Print(lib *Library) []byte {
 		Name:        lib.Name,
 		Indentation: "",
 		Class:       nil,
+		Types:       lib.Types,
 	}
 	for _, v := range lib.Vars {
 		printDecl(v, buf, "", ctx)
@@ -365,7 +370,7 @@ func printExpr(e ast.Expr, buf *bytes.Buffer, indent string, ctx *LibraryContext
 		case *ast.Ident:
 			idt = rhs
 		}
-		ty := info.Uses[idt].Type()
+		ty := ctx.Types.Uses[idt].Type()
 		switch ty.(type) {
 		case *types.Slice:
 			printExpr(et.X, buf, "", ctx)
@@ -749,7 +754,7 @@ func printRangeStmt(r *ast.RangeStmt, buf *bytes.Buffer, indent string, ctx *Lib
 		idt = rhs
 	}
 
-	ty := info.Uses[idt].Type()
+	ty := ctx.Types.Uses[idt].Type()
 	switch ty.(type) {
 	case *types.Slice:
 		buf.WriteString("for (int ")
@@ -869,4 +874,88 @@ func testFunc() {
 
 	foo, bar = bar, foo
 	fmt.Println(arr[1])
+}
+
+func transPackage(dir string) {
+	writeName := libName(dir)
+
+	defer func() {
+		if err := recover(); err != nil {
+			fmt.Println("Failed to transpile: " + dir)
+			ioutil.WriteFile(writeName, []byte(""), 0644)
+			//fmt.Fprintf(os.Stderr, "Exception: %v\n", err)
+		}
+	}()
+
+	files, err := ioutil.ReadDir(dir)
+	if err != nil {
+		fmt.Printf("Failed to read dir: %s", err)
+		return
+	}
+
+	lib := NewLibrary()
+	parsed := make([]*ast.File, len(files))
+	count := 0
+	fset = token.NewFileSet()
+	for _, fi := range files {
+		if strings.Contains(fi.Name(), ".go") && !strings.Contains(fi.Name(), "_test") {
+			f, err := parser.ParseFile(fset, filepath.Join(dir, fi.Name()), nil, 0)
+			if err == nil {
+				parsed[count] = f
+				count++
+			}
+
+		}
+	}
+
+	parsed = parsed[:count]
+	info := &types.Info{Defs: make(map[*ast.Ident]types.Object), Uses: make(map[*ast.Ident]types.Object), Types: make(map[ast.Expr]types.TypeAndValue)}
+	cfg := &types.Config{}
+	_, err = cfg.Check(filepath.Base(dir), fset, parsed, info)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	lib.Types = info
+	for _, f := range parsed {
+		LoadToLibrary(f, lib)
+		for _, imp := range f.Imports {
+			if imp.Path != nil {
+				path := filepath.Join("/usr/local/go/src", stripchars(imp.Path.Value, "\""))
+				name := libName(path)
+				if !doesFileExist(name) {
+					defer transPackage(path)
+				}
+			}
+		}
+	}
+
+	ioutil.WriteFile(writeName, convert(lib), 0644)
+}
+
+func convert(lib *Library) []byte {
+	return Print(lib)
+}
+
+func report(n ast.Node) {
+	//pos := n.Pos()
+	//fmt.Println("Problem at " + fset.Position(pos).String() + " with ")
+}
+
+func stripchars(str, chr string) string {
+	return strings.Map(func(r rune) rune {
+		if strings.IndexRune(chr, r) < 0 {
+			return r
+		}
+		return -1
+	}, str)
+}
+
+func libName(dir string) string {
+	return strings.Replace(dir, "/", "_", -1) + ".dart"
+}
+
+func doesFileExist(dir string) bool {
+	_, err := os.Stat(dir)
+	return err == nil
 }
