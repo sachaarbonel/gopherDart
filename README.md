@@ -31,12 +31,15 @@ Basically GopherJs, except with Dart.
 * recover
 * Various control statements
 * support for go standard libraries
+* Fix assignment statements not being concurrent
+```a,b := b,a``` is not transpiled properly
+* We lose the length of slices when we transpile to ListSlice
 
 ## Maybe todo
 * First class functions
 * Function pointers
 
-## Unsupported (and not todo) 
+## Not todo
 * goroutines
 
 ## In progress

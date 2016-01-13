@@ -860,22 +860,6 @@ func printDecl(d ast.Decl, buf *bytes.Buffer, indent string, ctx *LibraryContext
 	}
 }
 
-func testFunc() {
-	var foo int
-	foo = 7
-	bar := 12
-
-	arr := make(map[int]int, 5)
-	arr[1] = 1
-	arr[2] = 3
-
-	arr[1] = foo
-	arr[2] = bar
-
-	foo, bar = bar, foo
-	fmt.Println(arr[1])
-}
-
 func transPackage(dir string) {
 	writeName := libName(dir)
 
@@ -903,6 +887,9 @@ func transPackage(dir string) {
 			if err == nil {
 				parsed[count] = f
 				count++
+			} else {
+				fmt.Println("Error in parsing: " + dir)
+				fmt.Fprintf(os.Stderr, "Exception: %v\n", err)
 			}
 
 		}
@@ -917,11 +904,12 @@ func transPackage(dir string) {
 		return
 	}
 	lib.Types = info
+
 	for _, f := range parsed {
 		LoadToLibrary(f, lib)
-		for _, imp := range f.Imports {
+		for _, imp := range f.Imports { //recursively resolve dependencies.
 			if imp.Path != nil {
-				path := filepath.Join("/usr/local/go/src", stripchars(imp.Path.Value, "\""))
+				path := filepath.Join("/usr/local/go/src", stripchars(imp.Path.Value, "\"")) //hardcoded is bad.
 				name := libName(path)
 				if !doesFileExist(name) {
 					defer transPackage(path)
@@ -938,8 +926,9 @@ func convert(lib *Library) []byte {
 }
 
 func report(n ast.Node) {
-	//pos := n.Pos()
-	//fmt.Println("Problem at " + fset.Position(pos).String() + " with ")
+	pos := n.Pos()
+	fmt.Print("Problem at " + fset.Position(pos).String() + " with ")
+	fmt.Println(reflect.TypeOf(n))
 }
 
 func stripchars(str, chr string) string {
