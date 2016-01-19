@@ -21,13 +21,17 @@ To Run
 
 ## Unsupported
 
+
+
 * goroutines
 * defer
 * recover
 * Various control statements
-* First class functions
+
 * Function pointers
 * no support for go standard libraries
+* Cannot input functions as arguments
+* Labels 
 
 ## Status
 

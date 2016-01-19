@@ -10,12 +10,10 @@ import (
 	"go/token"
 	_ "golang.org/x/tools/go/gcimporter"
 	"golang.org/x/tools/go/types"
-	"io/ioutil"
+	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
-	"regexp"
 	"strconv"
 	"strings"
 )
@@ -378,18 +376,22 @@ func printExpr(e ast.Expr, buf *bytes.Buffer, indent string, ctx *LibraryContext
 		case *ast.Ident:
 			idt = rhs
 		}
-		ty := ctx.Types.Uses[idt].Type() //TODO: This breaks as well.
-		switch ty.(type) {
-		case *types.Slice:
-			printExpr(et.X, buf, "", ctx)
-			buf.WriteString(".elementAt(")
-			printExpr(et.Index, buf, "", ctx)
-			buf.WriteString(")")
-		case *types.Map:
-			printExpr(et.X, buf, "", ctx)
-			buf.WriteString("[")
-			printExpr(et.Index, buf, "", ctx)
-			buf.WriteString("]")
+		if use, ok := ctx.Types.Uses[idt]; ok {
+			ty := use.Type()
+			switch ty.(type) {
+			case *types.Slice:
+				printExpr(et.X, buf, "", ctx)
+				buf.WriteString(".elementAt(")
+				printExpr(et.Index, buf, "", ctx)
+				buf.WriteString(")")
+			case *types.Map:
+				printExpr(et.X, buf, "", ctx)
+				buf.WriteString("[")
+				printExpr(et.Index, buf, "", ctx)
+				buf.WriteString("]")
+			}
+		} else {
+			report(e) //failed to find idt in types list
 		}
 	case *ast.ArrayType:
 		buf.WriteString("ListSlice")
@@ -410,7 +412,6 @@ func printExpr(e ast.Expr, buf *bytes.Buffer, indent string, ctx *LibraryContext
 		// Do nothing i guess?
 	default:
 		report(e)
-		fmt.Printf("%sUnknown expr type: %s\n", indent, reflect.TypeOf(e))
 	}
 }
 
@@ -595,7 +596,6 @@ func printStmt(e ast.Stmt, buf *bytes.Buffer, indent string, ctx *LibraryContext
 
 	default:
 		report(e)
-		fmt.Printf("%sUnhandled function statement: %v\n", indent, reflect.TypeOf(e))
 	}
 }
 
@@ -753,6 +753,7 @@ func isMapIndex(lhTyped *ast.IndexExpr) bool {
 	return false
 }
 
+//TODO: Ranging over star expressions
 func printRangeStmt(r *ast.RangeStmt, buf *bytes.Buffer, indent string, ctx *LibraryContext) {
 	var idt *ast.Ident
 	switch rhs := r.X.(type) {
@@ -760,45 +761,66 @@ func printRangeStmt(r *ast.RangeStmt, buf *bytes.Buffer, indent string, ctx *Lib
 		idt = rhs.Sel
 	case *ast.Ident:
 		idt = rhs
-	}
+	case *ast.StarExpr:
+		asIdt, ok := rhs.X.(*ast.Ident)
+		if ok {
+			fmt.Println("IT'S WORKING!")
+			idt = asIdt
 
-	ty := ctx.Types.Uses[idt].Type()
-	switch ty.(type) {
-	case *types.Slice:
-		buf.WriteString("for (int ")
-		printExpr(r.Key, buf, "", ctx)
-		buf.WriteString(" = 0; ")
-		printExpr(r.Key, buf, "", ctx)
-		buf.WriteString(" < ")
-		printExpr(r.X, buf, "", ctx)
-		buf.WriteString(".length; ")
-		printExpr(r.Key, buf, "", ctx)
-		buf.WriteString("++) {\n")
-		buf.WriteString(indent + "  ")
-		buf.WriteString("var ")
-		printExpr(r.Value, buf, "", ctx)
-		buf.WriteString(" = ")
-		printExpr(r.X, buf, "", ctx)
-		buf.WriteString("[")
-		printExpr(r.Key, buf, "", ctx)
-		buf.WriteString("];\n")
-		for _, stmt := range r.Body.List {
-			printStmt(stmt, buf, indent+"  ", ctx)
+		} else {
+			report(r)
+			return
 		}
-		buf.WriteString(indent)
-		buf.WriteString("}\n")
-	case *types.Map:
-		printExpr(r.X, buf, indent, ctx)
-		buf.WriteString(".forEach( (")
-		printExpr(r.Key, buf, "", ctx)
-		buf.WriteString(", ")
-		printExpr(r.Value, buf, "", ctx)
-		buf.WriteString(") => ")
-		printStmt(r.Body, buf, "", ctx)
-		buf.WriteString(" );\n")
+	}
+	if use, ok := ctx.Types.Uses[idt]; ok {
+		ty := use.Type()
+		switch ty.(type) {
+		case *types.Slice:
+			buf.WriteString("for (int ")
+			printExpr(r.Key, buf, "", ctx)
+			buf.WriteString(" = 0; ")
+			printExpr(r.Key, buf, "", ctx)
+			buf.WriteString(" < ")
+			printExpr(r.X, buf, "", ctx)
+			buf.WriteString(".length; ")
+			printExpr(r.Key, buf, "", ctx)
+			buf.WriteString("++) {\n")
+			buf.WriteString(indent + "  ")
+			buf.WriteString("var ")
+			printExpr(r.Value, buf, "", ctx)
+			buf.WriteString(" = ")
+			printExpr(r.X, buf, "", ctx)
+			buf.WriteString("[")
+			printExpr(r.Key, buf, "", ctx)
+			buf.WriteString("];\n")
+			for _, stmt := range r.Body.List {
+				printStmt(stmt, buf, indent+"  ", ctx)
+			}
+			buf.WriteString(indent)
+			buf.WriteString("}\n")
+		case *types.Map:
+			printExpr(r.X, buf, indent, ctx)
+			buf.WriteString(".forEach( (")
+			printExpr(r.Key, buf, "", ctx)
+			buf.WriteString(", ")
+			printExpr(r.Value, buf, "", ctx)
+			buf.WriteString(") => ")
+			printStmt(r.Body, buf, "", ctx)
+			buf.WriteString(" );\n")
 
-	case *types.Chan:
-		report(r)
+		case *types.Chan:
+
+			report(r)
+			fmt.Println("Don't handle channels yet on range.")
+		default:
+			fmt.Println("Unhandled range type.", ty)
+			report(r.X)
+		}
+
+	} else {
+
+		report(r.X)
+		fmt.Println("Couldn't find type.")
 	}
 
 }
@@ -833,7 +855,8 @@ func printDecl(d ast.Decl, buf *bytes.Buffer, indent string, ctx *LibraryContext
 					buf.WriteString("{\n")
 					buf.WriteString("}")
 				default:
-					fmt.Printf("Unknown type in generic declaration printing: %s\n", reflect.TypeOf(ts.Type))
+					report(d)
+					//					fmt.Printf("Unknown type in generic declaration printing: %s\n", reflect.TypeOf(ts.Type))
 				}
 			}
 		case token.VAR, token.CONST:
@@ -889,18 +912,20 @@ func transPackage(dir string) error {
 	if doesFileExist(writeName) {
 		return errors.New("lib already made.")
 	}
+
 	toWrite := []byte("")
 	defer func() {
-		ioutil.WriteFile(writeName, toWrite, 0644)
+
 		if r := recover(); r != nil {
 			fmt.Println("Recovered: ", r)
+			outputFile(writeName, toWrite)
 		}
 
 	}()
 
 	file_names, err := getCompileFiles(dir)
 	if err != nil {
-		fmt.Printf("Failed to read dir: %s\n", err)
+		log.Fatal(err)
 		return err
 	}
 
@@ -926,21 +951,21 @@ func transPackage(dir string) error {
 	cfg := &types.Config{}
 	_, err = cfg.Check(filepath.Base(dir), fset, parsed, info)
 	if err != nil {
-		fmt.Println(err)
+		log.Fatal(err)
 		return err
 	}
 	lib.Types = info
 	for _, f := range parsed {
 		LoadToLibrary(f, lib)
 		for _, imp := range f.Imports {
-			if imp.Path != nil {
-				path := filepath.Join("/usr/local/go/src", stripchars(imp.Path.Value, "\""))
+			path := filepath.Join("/usr/local/go/src", stripchars(imp.Path.Value, "\""))
+			if imp.Path != nil && !doesFileExist(libName(path)) {
 				defer transPackage(path)
 			}
 		}
 	}
 	toWrite = convert(lib)
-	err = ioutil.WriteFile(writeName, toWrite, 0644)
+	outputFile(writeName, toWrite)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Exception: %v\n", err)
 		return err
@@ -955,45 +980,6 @@ func convert(lib *Library) []byte {
 }
 
 func report(n ast.Node) {
-	pos := n.Pos()
-	fmt.Println("Problem at " + fset.Position(pos).String() + " with " + reflect.TypeOf(n).String())
-}
+	fmt.Println("Issue with", reflect.TypeOf(n), "at", fset.Position(n.Pos()).String())
 
-func stripchars(str, chr string) string {
-	return strings.Map(func(r rune) rune {
-		if strings.IndexRune(chr, r) < 0 {
-			return r
-		}
-		return -1
-	}, str)
-}
-
-func getCompileFiles(dir string) ([]string, error) {
-	old_dir, err := os.Getwd()
-	if err != nil {
-		return nil, err
-	}
-	err = os.Chdir(dir)
-	defer os.Chdir(old_dir)                                   // woo using defers
-	cmd := exec.Command("go", "list", "-f", "'{{.GoFiles}}'") //heheheh
-	var out []byte
-	out, err = cmd.Output()
-	if err != nil {
-		return nil, err
-	}
-	filestr := string(out)
-	re := regexp.MustCompile("[\\[\\]']")
-	filestr = re.ReplaceAllLiteralString(filestr, "")
-	re = regexp.MustCompile("\\s")
-	return re.Split(filestr, -1), nil
-
-}
-
-func libName(dir string) string {
-	return strings.Replace(dir, "/", "_", -1) + ".dart"
-}
-
-func doesFileExist(dir string) bool {
-	_, err := os.Stat(dir)
-	return err == nil
 }
