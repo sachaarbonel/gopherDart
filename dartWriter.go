@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	//"github.com/lologarithm/gopherDart/structs"
+	"errors"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -11,8 +12,10 @@ import (
 	"golang.org/x/tools/go/types"
 	"io/ioutil"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -51,7 +54,7 @@ func LoadToLibrary(f *ast.File, lib *Library) string {
 					case *ast.StarExpr:
 						id, ok := rtt.X.(*ast.Ident)
 						if !ok {
-							fmt.Printf("Function %s receiver X incorrect type!?", d.Name.Name)
+							fmt.Printf("Function %s receiver X incorrect type!?\n", d.Name.Name)
 						}
 						if _, ok := lib.Classes[id.Name]; !ok {
 							lib.Classes[id.Name] = &Class{
@@ -63,7 +66,7 @@ func LoadToLibrary(f *ast.File, lib *Library) string {
 
 						lib.Classes[id.Name].Methods = append(lib.Classes[id.Name].Methods, d)
 					default:
-						fmt.Printf("Func declaration not being handled: %s", reflect.TypeOf(rt.Type))
+						fmt.Printf("Func declaration not being handled: %s\n", reflect.TypeOf(rt.Type))
 					}
 				}
 				//d.Recv.List[0].Type
@@ -163,24 +166,27 @@ func printClass(cl *Class, buf *bytes.Buffer, ctx *LibraryContext) {
 	newDefBuf.WriteString(cl.Name)
 	newDefBuf.WriteString("({")
 	indent := "  "
-	for idx, f := range cl.Fields {
-		printExpr(f.Type, buf, "  ", ctx)
-		buf.WriteString(" ")
-		// if !f.Names[0].IsExported() {
-		// 	buf.WriteString("_")
-		// } // TODO: Before we can do this we need to be able to generalize this behavior.
-		buf.WriteString(f.Names[0].Name)
-		buf.WriteString(";\n")
 
-		newDefBuf.WriteString(f.Names[0].Name)
-		newBodyBuf.WriteString(indent + "  ")
-		newBodyBuf.WriteString("this.")
-		newBodyBuf.WriteString(f.Names[0].Name)
-		newBodyBuf.WriteString(" = ")
-		newBodyBuf.WriteString(f.Names[0].Name)
-		newBodyBuf.WriteString(";\n")
-		if idx < len(cl.Fields)-1 {
-			newDefBuf.WriteString(", ")
+	for idx, f := range cl.Fields {
+		if f.Names != nil { //TODO TODO TODO, SILLY WORKAROUND
+			printExpr(f.Type, buf, "  ", ctx)
+			buf.WriteString(" ")
+			// if !f.Names[0].IsExported() {
+			// 	buf.WriteString("_")
+			// } // TODO: Before we can do this we need to be able to generalize this behavior.
+			buf.WriteString(f.Names[0].Name) //TODO: This line breaks.
+			buf.WriteString(";\n")
+
+			newDefBuf.WriteString(f.Names[0].Name)
+			newBodyBuf.WriteString(indent + "  ")
+			newBodyBuf.WriteString("this.")
+			newBodyBuf.WriteString(f.Names[0].Name)
+			newBodyBuf.WriteString(" = ")
+			newBodyBuf.WriteString(f.Names[0].Name)
+			newBodyBuf.WriteString(";\n")
+			if idx < len(cl.Fields)-1 {
+				newDefBuf.WriteString(", ")
+			}
 		}
 	}
 	newDefBuf.WriteString("}) {\n")
@@ -223,10 +229,12 @@ func printFunc(f *ast.FuncDecl, buf *bytes.Buffer, indent string, ctx *LibraryCo
 	buf.WriteString("(")
 	printParams(f.Type.Params, buf, "", ctx)
 	buf.WriteString(") {\n")
-
-	for _, stmt := range f.Body.List {
-		printStmt(stmt, buf, indent+"  ", ctx)
+	if f.Body != nil {
+		for _, stmt := range f.Body.List {
+			printStmt(stmt, buf, indent+"  ", ctx)
+		}
 	}
+
 	buf.WriteString(indent)
 	buf.WriteString("}\n")
 }
@@ -370,7 +378,7 @@ func printExpr(e ast.Expr, buf *bytes.Buffer, indent string, ctx *LibraryContext
 		case *ast.Ident:
 			idt = rhs
 		}
-		ty := ctx.Types.Uses[idt].Type()
+		ty := ctx.Types.Uses[idt].Type() //TODO: This breaks as well.
 		switch ty.(type) {
 		case *types.Slice:
 			printExpr(et.X, buf, "", ctx)
@@ -876,35 +884,40 @@ func testFunc() {
 	fmt.Println(arr[1])
 }
 
-func transPackage(dir string) {
+func transPackage(dir string) error {
 	writeName := libName(dir)
-
+	if doesFileExist(writeName) {
+		return errors.New("lib already made.")
+	}
+	toWrite := []byte("")
 	defer func() {
-		if err := recover(); err != nil {
-			fmt.Println("Failed to transpile: " + dir)
-			ioutil.WriteFile(writeName, []byte(""), 0644)
-			//fmt.Fprintf(os.Stderr, "Exception: %v\n", err)
+		ioutil.WriteFile(writeName, toWrite, 0644)
+		if r := recover(); r != nil {
+			fmt.Println("Recovered: ", r)
 		}
+
 	}()
 
-	files, err := ioutil.ReadDir(dir)
+	file_names, err := getCompileFiles(dir)
 	if err != nil {
-		fmt.Printf("Failed to read dir: %s", err)
-		return
+		fmt.Printf("Failed to read dir: %s\n", err)
+		return err
 	}
 
 	lib := NewLibrary()
-	parsed := make([]*ast.File, len(files))
+	parsed := make([]*ast.File, len(file_names))
 	count := 0
 	fset = token.NewFileSet()
-	for _, fi := range files {
-		if strings.Contains(fi.Name(), ".go") && !strings.Contains(fi.Name(), "_test") {
-			f, err := parser.ParseFile(fset, filepath.Join(dir, fi.Name()), nil, 0)
+	for _, fi := range file_names {
+		if strings.HasSuffix(fi, ".go") {
+			f, err := parser.ParseFile(fset, filepath.Join(dir, fi), nil, 0)
 			if err == nil {
 				parsed[count] = f
 				count++
+			} else {
+				fmt.Fprintf(os.Stderr, "Exception: %v\n", err)
+				return err
 			}
-
 		}
 	}
 
@@ -914,7 +927,7 @@ func transPackage(dir string) {
 	_, err = cfg.Check(filepath.Base(dir), fset, parsed, info)
 	if err != nil {
 		fmt.Println(err)
-		return
+		return err
 	}
 	lib.Types = info
 	for _, f := range parsed {
@@ -922,15 +935,19 @@ func transPackage(dir string) {
 		for _, imp := range f.Imports {
 			if imp.Path != nil {
 				path := filepath.Join("/usr/local/go/src", stripchars(imp.Path.Value, "\""))
-				name := libName(path)
-				if !doesFileExist(name) {
-					defer transPackage(path)
-				}
+				defer transPackage(path)
 			}
 		}
 	}
+	toWrite = convert(lib)
+	err = ioutil.WriteFile(writeName, toWrite, 0644)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Exception: %v\n", err)
+		return err
+	}
+	fmt.Println("Successfully generated: " + dir)
+	return nil
 
-	ioutil.WriteFile(writeName, convert(lib), 0644)
 }
 
 func convert(lib *Library) []byte {
@@ -938,8 +955,8 @@ func convert(lib *Library) []byte {
 }
 
 func report(n ast.Node) {
-	//pos := n.Pos()
-	//fmt.Println("Problem at " + fset.Position(pos).String() + " with ")
+	pos := n.Pos()
+	fmt.Println("Problem at " + fset.Position(pos).String() + " with " + reflect.TypeOf(n).String())
 }
 
 func stripchars(str, chr string) string {
@@ -949,6 +966,27 @@ func stripchars(str, chr string) string {
 		}
 		return -1
 	}, str)
+}
+
+func getCompileFiles(dir string) ([]string, error) {
+	old_dir, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+	err = os.Chdir(dir)
+	defer os.Chdir(old_dir)                                   // woo using defers
+	cmd := exec.Command("go", "list", "-f", "'{{.GoFiles}}'") //heheheh
+	var out []byte
+	out, err = cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	filestr := string(out)
+	re := regexp.MustCompile("[\\[\\]']")
+	filestr = re.ReplaceAllLiteralString(filestr, "")
+	re = regexp.MustCompile("\\s")
+	return re.Split(filestr, -1), nil
+
 }
 
 func libName(dir string) string {

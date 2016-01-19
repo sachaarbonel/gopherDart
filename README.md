@@ -33,3 +33,10 @@ To Run
 
 * Untested
 * 
+
+
+#TODO
+Figure out how to deal with conditional compilation commands.
+Fix the millions of nil dereferences.
+
+Probably should do major refactor for posterity.

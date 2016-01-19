@@ -2,7 +2,6 @@
 package main
 
 import (
-	//"github.com/lologarithm/gopherDart/dart"
 	"go/token"
 	"os"
 )
