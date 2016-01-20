@@ -3,8 +3,11 @@ package main
 
 import (
 	"go/token"
+	"io/ioutil"
 	"log"
 	"os"
+	"os/exec"
+	"path"
 	"path/filepath"
 )
 
@@ -12,11 +15,20 @@ var fset *token.FileSet
 
 func main() {
 	dir := os.Args[1]
-	err := RemoveContents("out")
+	err := RemoveContents(path.Join(dir, "lib"))
 	if err != nil {
 		log.Fatal(err)
 	}
-	transPackage(dir)
+	transpile(dir)
+
+	files, err := ioutil.ReadDir("standlib")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for _, f := range files {
+		exec.Command("cp", "standlib/"+f.Name(), path.Join(dir, "lib")).Run()
+	}
 
 }
 

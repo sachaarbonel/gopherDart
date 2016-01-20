@@ -32,6 +32,7 @@ To Run
 * no support for go standard libraries
 * Cannot input functions as arguments
 * Labels 
+* Pointers (StarExpr)
 
 ## Status
 

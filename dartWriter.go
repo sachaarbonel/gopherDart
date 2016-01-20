@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	//"github.com/lologarithm/gopherDart/structs"
-	"errors"
+	//"errors"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -100,6 +100,9 @@ func LoadToLibrary(f *ast.File, lib *Library) string {
 			fmt.Printf("Other declaration in file? %s, %v", reflect.TypeOf(d), d)
 		}
 	}
+	for _, imp := range f.Imports {
+		lib.Imports = append(lib.Imports, imp)
+	}
 
 	return ""
 }
@@ -111,6 +114,12 @@ func Print(lib *Library) []byte {
 	buf.WriteString(lib.Name)
 	buf.WriteString(";")
 	buf.WriteString("\n\n")
+	for _, imp := range lib.Imports {
+
+		path := filepath.Join("/usr/local/go/src", stripchars(imp.Path.Value, "\""))
+		name := libName(path)
+		buf.WriteString("import '" + name + ".dart' as " + name + ";\n")
+	}
 	buf.WriteString(sliceHeader) // Write the slice class at start of dart file.
 
 	ctx := &LibraryContext{
@@ -119,6 +128,7 @@ func Print(lib *Library) []byte {
 		Class:       nil,
 		Types:       lib.Types,
 	}
+
 	for _, v := range lib.Vars {
 		printDecl(v, buf, "", ctx)
 		buf.WriteString(";\n")
@@ -579,7 +589,7 @@ func printStmt(e ast.Stmt, buf *bytes.Buffer, indent string, ctx *LibraryContext
 							}
 							buf.WriteString(") {\n ")
 						} else {
-							//Idk why this else exists, do I only support type switches on pointers? //TODO
+							//Idk why this else exists, do I only support type switches on pointers? TODO
 						}
 					} else {
 						buf.WriteString(indent + "else {\n")
@@ -599,6 +609,7 @@ func printStmt(e ast.Stmt, buf *bytes.Buffer, indent string, ctx *LibraryContext
 	}
 }
 
+//TODO: fix multiple assignment being no concurrent.
 func printAssignStmt(st *ast.AssignStmt, buf *bytes.Buffer, indent string, ctx *LibraryContext) {
 	if len(st.Lhs) > 1 && len(st.Rhs) == 1 {
 		isAssign := st.Tok == token.DEFINE
@@ -696,22 +707,32 @@ func printAssignStmt(st *ast.AssignStmt, buf *bytes.Buffer, indent string, ctx *
 			case *ast.CallExpr:
 				ident, ok := rhTyped.Fun.(*ast.Ident)
 				if ok {
-					if ident.Name == "append" {
-						printExpr(lh, buf, "", ctx)
-						buf.WriteString(".add(")
-						printExpr(rhTyped.Args[1], buf, "", ctx)
-						buf.WriteString(")")
-						// TODO: deal with ..., use 'addAll'
-						// TODO: deal with args[0] not being the RHS.
-						//   We would need to create an add inside of an add.
-						continue
-					} else if ident.Name == "make" {
-						printExpr(lh, buf, "", ctx)
-						buf.WriteString(tokenMap[st.Tok])
-						buf.WriteString("new ")
-						printExpr(rhTyped.Args[0], buf, "", ctx)
-						buf.WriteString("()")
-						continue
+					switch ident.Name {
+					case "append":
+						{
+							printExpr(lh, buf, "", ctx)
+							buf.WriteString(".add(")
+							printExpr(rhTyped.Args[1], buf, "", ctx)
+							buf.WriteString(")")
+							// TODO: deal with ..., use 'addAll'
+							// TODO: deal with args[0] not being the RHS.
+							//   We would need to create an add inside of an add.
+							continue
+						}
+					case "make":
+						{
+							printExpr(lh, buf, "", ctx)
+							buf.WriteString(tokenMap[st.Tok])
+							buf.WriteString("new ")
+							printExpr(rhTyped.Args[0], buf, "", ctx)
+							buf.WriteString("()")
+							continue
+						}
+					case "recover":
+						{
+							fmt.Println("do no support recovers yet.")
+							report(st)
+						}
 					}
 				}
 			}
@@ -761,12 +782,13 @@ func printRangeStmt(r *ast.RangeStmt, buf *bytes.Buffer, indent string, ctx *Lib
 		idt = rhs.Sel
 	case *ast.Ident:
 		idt = rhs
-	case *ast.StarExpr:
+
+	case *ast.StarExpr: //99% sure this does not work. TODO
+		fmt.Println("Starexpr for range:")
+		report(r)
 		asIdt, ok := rhs.X.(*ast.Ident)
 		if ok {
-			fmt.Println("IT'S WORKING!")
 			idt = asIdt
-
 		} else {
 			report(r)
 			return
@@ -891,35 +913,23 @@ func printDecl(d ast.Decl, buf *bytes.Buffer, indent string, ctx *LibraryContext
 	}
 }
 
-func testFunc() {
-	var foo int
-	foo = 7
-	bar := 12
-
-	arr := make(map[int]int, 5)
-	arr[1] = 1
-	arr[2] = 3
-
-	arr[1] = foo
-	arr[2] = bar
-
-	foo, bar = bar, foo
-	fmt.Println(arr[1])
-}
-
-func transPackage(dir string) error {
-	writeName := libName(dir)
-	if doesFileExist(writeName) {
-		return errors.New("lib already made.")
+func transpile(dir string) error {
+	writeName := libName(dir + ".dart")
+	fmt.Println("Transpiling: " + writeName)
+	switch writeName {
+	case "fmt.dart":
+		{
+			fmt.Println("using fmt")
+			//outputFile(writeName, []byte(""))
+			return nil
+		}
 	}
-
 	toWrite := []byte("")
 	defer func() {
-
-		if r := recover(); r != nil {
-			fmt.Println("Recovered: ", r)
-			outputFile(writeName, toWrite)
-		}
+		// if r := recover(); r != nil {
+		// 	fmt.Println("Recovered: ", r)
+		// 	outputFile(writeName, toWrite)
+		// }
 
 	}()
 
@@ -928,6 +938,7 @@ func transPackage(dir string) error {
 		log.Fatal(err)
 		return err
 	}
+	fmt.Println(os.Getwd())
 
 	lib := NewLibrary()
 	parsed := make([]*ast.File, len(file_names))
@@ -958,9 +969,9 @@ func transPackage(dir string) error {
 	for _, f := range parsed {
 		LoadToLibrary(f, lib)
 		for _, imp := range f.Imports {
-			path := filepath.Join("/usr/local/go/src", stripchars(imp.Path.Value, "\""))
-			if imp.Path != nil && !doesFileExist(libName(path)) {
-				defer transPackage(path)
+			path := filepath.Join("/usr/local/go/src", stripchars(imp.Path.Value, "\"")) //hardcoded standard library location, TODO
+			if imp.Path != nil && !doesFileExist(libName(path)+".dart") {
+				defer transpile(path)
 			}
 		}
 	}

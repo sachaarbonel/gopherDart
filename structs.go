@@ -14,6 +14,7 @@ type Library struct {
 	Funcs      []*ast.FuncDecl
 	Vars       []*ast.GenDecl
 	Types      *types.Info
+	Imports    []*ast.ImportSpec
 }
 
 func NewLibrary() *Library {
@@ -24,6 +25,7 @@ func NewLibrary() *Library {
 		Funcs:      []*ast.FuncDecl{},
 		Vars:       []*ast.GenDecl{},
 		Types:      nil,
+		Imports:    []*ast.ImportSpec{},
 	}
 }
 
