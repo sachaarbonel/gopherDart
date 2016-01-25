@@ -120,7 +120,8 @@ func Print(lib *Library) []byte {
 		name := libName(path)
 		buf.WriteString("import '" + name + ".dart' as " + name + ";\n")
 	}
-	buf.WriteString(sliceHeader) // Write the slice class at start of dart file.
+
+	buf.WriteString("import 'ListSlice.dart';\n") // Write the slice class at start of dart file.
 
 	ctx := &LibraryContext{
 		Name:        lib.Name,
@@ -723,9 +724,15 @@ func printAssignStmt(st *ast.AssignStmt, buf *bytes.Buffer, indent string, ctx *
 						{
 							printExpr(lh, buf, "", ctx)
 							buf.WriteString(tokenMap[st.Tok])
+
 							buf.WriteString("new ")
 							printExpr(rhTyped.Args[0], buf, "", ctx)
-							buf.WriteString("()")
+							buf.WriteString("(")
+							for _, e := range rhTyped.Args[1:] {
+								printExpr(e, buf, "", ctx)
+							}
+
+							buf.WriteString(")")
 							continue
 						}
 					case "recover":
