@@ -2,7 +2,6 @@
 package main
 
 import (
-	"go/token"
 	"io/ioutil"
 	"log"
 	"os"
@@ -11,11 +10,9 @@ import (
 	"path/filepath"
 )
 
-var fset *token.FileSet
-
 func main() {
 	dir := os.Args[1]
-	err := RemoveContents(path.Join(dir, "lib"))
+	err := RemoveContents("lib")
 	if err != nil {
 		log.Fatal(err)
 	}

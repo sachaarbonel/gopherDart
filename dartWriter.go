@@ -12,6 +12,7 @@ import (
 	"golang.org/x/tools/go/types"
 	"log"
 	"os"
+	//"path"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -121,7 +122,7 @@ func Print(lib *Library) []byte {
 		buf.WriteString("import '" + name + ".dart' as " + name + ";\n")
 	}
 
-	buf.WriteString("import 'ListSlice.dart';\n") // Write the slice class at start of dart file.
+	buf.WriteString("import 'ListSlice.dart';\n") // just have everyone import listslice.
 
 	ctx := &LibraryContext{
 		Name:        lib.Name,
@@ -923,6 +924,11 @@ func printDecl(d ast.Decl, buf *bytes.Buffer, indent string, ctx *LibraryContext
 var transpiled map[string]bool
 
 func transpile(dir string) error {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Println("Recovered.")
+		}
+	}()
 	if transpiled == nil {
 		transpiled = make(map[string]bool)
 	}
@@ -935,6 +941,7 @@ func transpile(dir string) error {
 			return nil
 		}
 	}
+
 	toWrite := []byte("")
 
 	lib, err := buildLibrary(dir)
@@ -944,19 +951,37 @@ func transpile(dir string) error {
 	}
 	toWrite = Print(lib)
 	outputFile(writeName, toWrite)
+	local_path := filepath.Join(os.Getenv("GOPATH"), "src")
+	std_path := "/usr/local/go/src"
 	for _, imp := range lib.Imports {
-		path := filepath.Join("/usr/local/go/src", stripchars(imp.Path.Value, "\"")) //hardcoded standard library location, TODO
-		if imp.Path != nil && !transpiled[path] {
-			transpiled[path] = true
-			defer transpile(path)
+		fpath := filepath.Join(std_path, stripchars(imp.Path.Value, "\"")) //hardcoded standard library location, TODO
+
+		if !exists(fpath) {
+			fmt.Println("Couldn't find ", fpath, " as standard library, trying locally.")
+			fpath = filepath.Join(local_path, stripchars(imp.Path.Value, "\""))
+			if imp.Path != nil && exists(fpath) && !transpiled[fpath] {
+				fmt.Println("Found ", fpath, " locally.")
+				transpiled[fpath] = true
+				defer transpile(fpath)
+			} else {
+				fmt.Println("Couldn't find ", fpath, " locally.")
+			}
+		} else if imp.Path != nil && !transpiled[fpath] {
+			fmt.Println("Found ", fpath, "as std lib.")
+			transpiled[fpath] = true
+			defer transpile(fpath)
+		} else {
+			//probably helpful message here.
 		}
+
 	}
-	fmt.Println("Successfully generated: " + dir)
+	fmt.Println("Successfully generated: " + dir + " with name " + writeName)
 	return nil
 
 }
 
 func buildLibrary(dir string) (*Library, error) {
+
 	file_names, err := getCompileFiles(dir)
 
 	if err != nil {
@@ -967,7 +992,8 @@ func buildLibrary(dir string) (*Library, error) {
 	lib := NewLibrary()
 	parsed := make([]*ast.File, len(file_names))
 	count := 0
-	fset = token.NewFileSet()
+	fset := token.NewFileSet()
+
 	for _, fi := range file_names {
 		if strings.HasSuffix(fi, ".go") {
 			f, err := parser.ParseFile(fset, filepath.Join(dir, fi), nil, 0)
@@ -986,11 +1012,11 @@ func buildLibrary(dir string) (*Library, error) {
 	cfg := &types.Config{}
 	_, err = cfg.Check(filepath.Base(dir), fset, parsed, info)
 	if err != nil {
-		log.Fatal(err)
+		//log.Fatal(err)
 		return nil, err
 	}
-	lib.Types = info
 
+	lib.Types = info
 	for _, f := range parsed {
 		LoadToLibrary(f, lib)
 	}
@@ -999,5 +1025,5 @@ func buildLibrary(dir string) (*Library, error) {
 }
 
 func report(n ast.Node) {
-	fmt.Println("Issue with", reflect.TypeOf(n), "at", fset.Position(n.Pos()).String())
+	fmt.Println("Issue with", reflect.TypeOf(n))
 }
