@@ -951,6 +951,7 @@ func transpile(dir string) error {
 
 func buildLibrary(dir string) (*Library, error) {
 	file_names, err := getCompileFiles(dir)
+
 	if err != nil {
 		log.Fatal(err)
 		return nil, err
@@ -982,6 +983,7 @@ func buildLibrary(dir string) (*Library, error) {
 		return nil, err
 	}
 	lib.Types = info
+
 	for _, f := range parsed {
 		LoadToLibrary(f, lib)
 	}
@@ -991,5 +993,4 @@ func buildLibrary(dir string) (*Library, error) {
 
 func report(n ast.Node) {
 	fmt.Println("Issue with", reflect.TypeOf(n), "at", fset.Position(n.Pos()).String())
-
 }
