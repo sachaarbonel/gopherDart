@@ -27,17 +27,17 @@ Basically GopherJs, except with Dart.
 
 ## Todo
 
+* goroutines
 * defer
 * recover
 * Various control statements
-* support for go standard libraries
-* Fix assignment statements not being concurrent
-```a,b := b,a``` is not transpiled properly
-* We lose the length of slices when we transpile to ListSlice
 
-## Maybe todo
-* First class functions
 * Function pointers
+* no support for go standard libraries
+* Cannot input functions as arguments
+* Labels 
+* Pointers (StarExpr)
+
 
 ## Not todo
 * goroutines
@@ -47,4 +47,14 @@ Basically GopherJs, except with Dart.
 * Working on dependency resolution
 * Alex is learning Dart
 * Starting real testing.
+
+* Untested
+* 
+
+
+#TODO
+Figure out how to deal with conditional compilation commands.
+Fix the millions of nil dereferences.
+
+Probably should do major refactor for posterity.
 
