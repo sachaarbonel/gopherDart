@@ -975,7 +975,7 @@ func transpile(dir string) error {
 			}
 		}
 	}
-	toWrite = convert(lib)
+	toWrite = Print(lib)
 	outputFile(writeName, toWrite)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Exception: %v\n", err)
@@ -984,10 +984,6 @@ func transpile(dir string) error {
 	fmt.Println("Successfully generated: " + dir)
 	return nil
 
-}
-
-func convert(lib *Library) []byte {
-	return Print(lib)
 }
 
 func report(n ast.Node) {
