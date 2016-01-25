@@ -52,3 +52,8 @@ func doesFileExist(dir string) bool {
 	_, err := os.Stat(path.Join("lib", dir))
 	return err == nil
 }
+
+func alreadyMade(writeName string) bool {
+	run_dir := os.Args[1]
+	return doesFileExist(path.Join(run_dir, "lib", writeName))
+}

@@ -913,32 +913,48 @@ func printDecl(d ast.Decl, buf *bytes.Buffer, indent string, ctx *LibraryContext
 	}
 }
 
+var transpiled map[string]bool
+
 func transpile(dir string) error {
+	if transpiled == nil {
+		transpiled = make(map[string]bool)
+	}
 	writeName := libName(dir + ".dart")
 	fmt.Println("Transpiling: " + writeName)
 	switch writeName {
 	case "fmt.dart":
 		{
 			fmt.Println("using fmt")
-			//outputFile(writeName, []byte(""))
 			return nil
 		}
 	}
 	toWrite := []byte("")
-	defer func() {
-		// if r := recover(); r != nil {
-		// 	fmt.Println("Recovered: ", r)
-		// 	outputFile(writeName, toWrite)
-		// }
 
-	}()
+	lib, err := buildLibrary(dir)
+	if err != nil {
+		fmt.Println("Error building library.")
+		return err
+	}
+	toWrite = Print(lib)
+	outputFile(writeName, toWrite)
+	for _, imp := range lib.Imports {
+		path := filepath.Join("/usr/local/go/src", stripchars(imp.Path.Value, "\"")) //hardcoded standard library location, TODO
+		if imp.Path != nil && !transpiled[path] {
+			transpiled[path] = true
+			defer transpile(path)
+		}
+	}
+	fmt.Println("Successfully generated: " + dir)
+	return nil
 
+}
+
+func buildLibrary(dir string) (*Library, error) {
 	file_names, err := getCompileFiles(dir)
 	if err != nil {
 		log.Fatal(err)
-		return err
+		return nil, err
 	}
-	fmt.Println(os.Getwd())
 
 	lib := NewLibrary()
 	parsed := make([]*ast.File, len(file_names))
@@ -952,7 +968,7 @@ func transpile(dir string) error {
 				count++
 			} else {
 				fmt.Fprintf(os.Stderr, "Exception: %v\n", err)
-				return err
+				return nil, err
 			}
 		}
 	}
@@ -963,27 +979,14 @@ func transpile(dir string) error {
 	_, err = cfg.Check(filepath.Base(dir), fset, parsed, info)
 	if err != nil {
 		log.Fatal(err)
-		return err
+		return nil, err
 	}
 	lib.Types = info
 	for _, f := range parsed {
 		LoadToLibrary(f, lib)
-		for _, imp := range f.Imports {
-			path := filepath.Join("/usr/local/go/src", stripchars(imp.Path.Value, "\"")) //hardcoded standard library location, TODO
-			if imp.Path != nil && !doesFileExist(libName(path)+".dart") {
-				defer transpile(path)
-			}
-		}
 	}
-	toWrite = Print(lib)
-	outputFile(writeName, toWrite)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Exception: %v\n", err)
-		return err
-	}
-	fmt.Println("Successfully generated: " + dir)
-	return nil
 
+	return lib, nil
 }
 
 func report(n ast.Node) {
