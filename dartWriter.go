@@ -967,7 +967,7 @@ func buildLibrary(dir string) (*Library, error) {
 	lib := NewLibrary()
 	parsed := make([]*ast.File, len(file_names))
 	count := 0
-	fset = token.NewFileSet()
+	fset := token.NewFileSet()
 	for _, fi := range file_names {
 		if strings.HasSuffix(fi, ".go") {
 			f, err := parser.ParseFile(fset, filepath.Join(dir, fi), nil, 0)
@@ -985,10 +985,12 @@ func buildLibrary(dir string) (*Library, error) {
 	info := &types.Info{Defs: make(map[*ast.Ident]types.Object), Uses: make(map[*ast.Ident]types.Object), Types: make(map[ast.Expr]types.TypeAndValue)}
 	cfg := &types.Config{}
 	_, err = cfg.Check(filepath.Base(dir), fset, parsed, info)
+
 	if err != nil {
 		log.Fatal(err)
 		return nil, err
 	}
+
 	lib.Types = info
 
 	for _, f := range parsed {
@@ -999,5 +1001,5 @@ func buildLibrary(dir string) (*Library, error) {
 }
 
 func report(n ast.Node) {
-	fmt.Println("Issue with", reflect.TypeOf(n), "at", fset.Position(n.Pos()).String())
+	fmt.Println("Issue with", reflect.TypeOf(n))
 }

@@ -2,7 +2,6 @@
 package main
 
 import (
-	"go/token"
 	"io/ioutil"
 	"log"
 	"os"
@@ -10,8 +9,6 @@ import (
 	"path"
 	"path/filepath"
 )
-
-var fset *token.FileSet
 
 func main() {
 	dir := os.Args[1]
