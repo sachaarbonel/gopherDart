@@ -932,7 +932,7 @@ func transpile(dir string) error {
 	if transpiled == nil {
 		transpiled = make(map[string]bool)
 	}
-	writeName := libName(dir + ".dart")
+	writeName := libName(dir) + ".dart"
 	fmt.Println("Transpiling: " + writeName)
 	switch writeName {
 	case "fmt.dart":
