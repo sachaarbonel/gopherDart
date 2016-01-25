@@ -39,21 +39,25 @@ func getCompileFiles(dir string) ([]string, error) {
 }
 
 func outputFile(fname string, toWrite []byte) error {
-	run_dir := os.Args[1]
+	//run_dir := os.Args[0]
 
-	return ioutil.WriteFile(path.Join(run_dir, "lib", fname), toWrite, 0644)
+	return ioutil.WriteFile(path.Join("lib", fname), toWrite, 0644)
 }
 
 func libName(dir string) string {
-	return path.Base(dir)
+	st := path.Base(dir)
+	return st
+
 }
 
-func doesFileExist(dir string) bool {
-	_, err := os.Stat(path.Join("lib", dir))
-	return err == nil
-}
-
-func alreadyMade(writeName string) bool {
-	run_dir := os.Args[1]
-	return doesFileExist(path.Join(run_dir, "lib", writeName))
+// exists returns whether the given file or directory exists or not
+func exists(path string) bool {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true
+	}
+	if os.IsNotExist(err) {
+		return false
+	}
+	return false
 }

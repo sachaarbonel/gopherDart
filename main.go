@@ -12,7 +12,7 @@ import (
 
 func main() {
 	dir := os.Args[1]
-	err := RemoveContents(path.Join(dir, "lib"))
+	err := RemoveContents("lib")
 	if err != nil {
 		log.Fatal(err)
 	}
