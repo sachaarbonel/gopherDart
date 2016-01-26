@@ -4,13 +4,15 @@ import (
 	"bytes"
 	"fmt"
 	//"github.com/lologarithm/gopherDart/structs"
+	//"errors"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	_ "golang.org/x/tools/go/gcimporter"
 	"golang.org/x/tools/go/types"
-	"io/ioutil"
+	"log"
 	"os"
+	//"path"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -51,7 +53,7 @@ func LoadToLibrary(f *ast.File, lib *Library) string {
 					case *ast.StarExpr:
 						id, ok := rtt.X.(*ast.Ident)
 						if !ok {
-							fmt.Printf("Function %s receiver X incorrect type!?", d.Name.Name)
+							fmt.Printf("Function %s receiver X incorrect type!?\n", d.Name.Name)
 						}
 						if _, ok := lib.Classes[id.Name]; !ok {
 							lib.Classes[id.Name] = &Class{
@@ -63,7 +65,7 @@ func LoadToLibrary(f *ast.File, lib *Library) string {
 
 						lib.Classes[id.Name].Methods = append(lib.Classes[id.Name].Methods, d)
 					default:
-						fmt.Printf("Func declaration not being handled: %s", reflect.TypeOf(rt.Type))
+						fmt.Printf("Func declaration not being handled: %s\n", reflect.TypeOf(rt.Type))
 					}
 				}
 				//d.Recv.List[0].Type
@@ -99,6 +101,9 @@ func LoadToLibrary(f *ast.File, lib *Library) string {
 			fmt.Printf("Other declaration in file? %s, %v", reflect.TypeOf(d), d)
 		}
 	}
+	for _, imp := range f.Imports {
+		lib.Imports = append(lib.Imports, imp)
+	}
 
 	return ""
 }
@@ -110,7 +115,14 @@ func Print(lib *Library) []byte {
 	buf.WriteString(lib.Name)
 	buf.WriteString(";")
 	buf.WriteString("\n\n")
-	buf.WriteString(sliceHeader) // Write the slice class at start of dart file.
+	for _, imp := range lib.Imports {
+
+		path := filepath.Join("/usr/local/go/src", stripchars(imp.Path.Value, "\""))
+		name := libName(path)
+		buf.WriteString("import '" + name + ".dart' as " + name + ";\n")
+	}
+
+	buf.WriteString("import 'ListSlice.dart';\n") // just have everyone import listslice.
 
 	ctx := &LibraryContext{
 		Name:        lib.Name,
@@ -118,6 +130,7 @@ func Print(lib *Library) []byte {
 		Class:       nil,
 		Types:       lib.Types,
 	}
+
 	for _, v := range lib.Vars {
 		printDecl(v, buf, "", ctx)
 		buf.WriteString(";\n")
@@ -163,24 +176,27 @@ func printClass(cl *Class, buf *bytes.Buffer, ctx *LibraryContext) {
 	newDefBuf.WriteString(cl.Name)
 	newDefBuf.WriteString("({")
 	indent := "  "
-	for idx, f := range cl.Fields {
-		printExpr(f.Type, buf, "  ", ctx)
-		buf.WriteString(" ")
-		// if !f.Names[0].IsExported() {
-		// 	buf.WriteString("_")
-		// } // TODO: Before we can do this we need to be able to generalize this behavior.
-		buf.WriteString(f.Names[0].Name)
-		buf.WriteString(";\n")
 
-		newDefBuf.WriteString(f.Names[0].Name)
-		newBodyBuf.WriteString(indent + "  ")
-		newBodyBuf.WriteString("this.")
-		newBodyBuf.WriteString(f.Names[0].Name)
-		newBodyBuf.WriteString(" = ")
-		newBodyBuf.WriteString(f.Names[0].Name)
-		newBodyBuf.WriteString(";\n")
-		if idx < len(cl.Fields)-1 {
-			newDefBuf.WriteString(", ")
+	for idx, f := range cl.Fields {
+		if f.Names != nil { //TODO TODO TODO, SILLY WORKAROUND
+			printExpr(f.Type, buf, "  ", ctx)
+			buf.WriteString(" ")
+			// if !f.Names[0].IsExported() {
+			// 	buf.WriteString("_")
+			// } // TODO: Before we can do this we need to be able to generalize this behavior.
+			buf.WriteString(f.Names[0].Name) //TODO: This line breaks.
+			buf.WriteString(";\n")
+
+			newDefBuf.WriteString(f.Names[0].Name)
+			newBodyBuf.WriteString(indent + "  ")
+			newBodyBuf.WriteString("this.")
+			newBodyBuf.WriteString(f.Names[0].Name)
+			newBodyBuf.WriteString(" = ")
+			newBodyBuf.WriteString(f.Names[0].Name)
+			newBodyBuf.WriteString(";\n")
+			if idx < len(cl.Fields)-1 {
+				newDefBuf.WriteString(", ")
+			}
 		}
 	}
 	newDefBuf.WriteString("}) {\n")
@@ -223,10 +239,12 @@ func printFunc(f *ast.FuncDecl, buf *bytes.Buffer, indent string, ctx *LibraryCo
 	buf.WriteString("(")
 	printParams(f.Type.Params, buf, "", ctx)
 	buf.WriteString(") {\n")
-
-	for _, stmt := range f.Body.List {
-		printStmt(stmt, buf, indent+"  ", ctx)
+	if f.Body != nil {
+		for _, stmt := range f.Body.List {
+			printStmt(stmt, buf, indent+"  ", ctx)
+		}
 	}
+
 	buf.WriteString(indent)
 	buf.WriteString("}\n")
 }
@@ -370,18 +388,22 @@ func printExpr(e ast.Expr, buf *bytes.Buffer, indent string, ctx *LibraryContext
 		case *ast.Ident:
 			idt = rhs
 		}
-		ty := ctx.Types.Uses[idt].Type()
-		switch ty.(type) {
-		case *types.Slice:
-			printExpr(et.X, buf, "", ctx)
-			buf.WriteString(".elementAt(")
-			printExpr(et.Index, buf, "", ctx)
-			buf.WriteString(")")
-		case *types.Map:
-			printExpr(et.X, buf, "", ctx)
-			buf.WriteString("[")
-			printExpr(et.Index, buf, "", ctx)
-			buf.WriteString("]")
+		if use, ok := ctx.Types.Uses[idt]; ok {
+			ty := use.Type()
+			switch ty.(type) {
+			case *types.Slice:
+				printExpr(et.X, buf, "", ctx)
+				buf.WriteString(".elementAt(")
+				printExpr(et.Index, buf, "", ctx)
+				buf.WriteString(")")
+			case *types.Map:
+				printExpr(et.X, buf, "", ctx)
+				buf.WriteString("[")
+				printExpr(et.Index, buf, "", ctx)
+				buf.WriteString("]")
+			}
+		} else {
+			report(e) //failed to find idt in types list
 		}
 	case *ast.ArrayType:
 		buf.WriteString("ListSlice")
@@ -402,7 +424,6 @@ func printExpr(e ast.Expr, buf *bytes.Buffer, indent string, ctx *LibraryContext
 		// Do nothing i guess?
 	default:
 		report(e)
-		fmt.Printf("%sUnknown expr type: %s\n", indent, reflect.TypeOf(e))
 	}
 }
 
@@ -570,7 +591,7 @@ func printStmt(e ast.Stmt, buf *bytes.Buffer, indent string, ctx *LibraryContext
 							}
 							buf.WriteString(") {\n ")
 						} else {
-							//Idk why this else exists, do I only support type switches on pointers? //TODO
+							//Idk why this else exists, do I only support type switches on pointers? TODO
 						}
 					} else {
 						buf.WriteString(indent + "else {\n")
@@ -587,10 +608,10 @@ func printStmt(e ast.Stmt, buf *bytes.Buffer, indent string, ctx *LibraryContext
 
 	default:
 		report(e)
-		fmt.Printf("%sUnhandled function statement: %v\n", indent, reflect.TypeOf(e))
 	}
 }
 
+//TODO: fix multiple assignment being no concurrent.
 func printAssignStmt(st *ast.AssignStmt, buf *bytes.Buffer, indent string, ctx *LibraryContext) {
 	if len(st.Lhs) > 1 && len(st.Rhs) == 1 {
 		isAssign := st.Tok == token.DEFINE
@@ -688,22 +709,38 @@ func printAssignStmt(st *ast.AssignStmt, buf *bytes.Buffer, indent string, ctx *
 			case *ast.CallExpr:
 				ident, ok := rhTyped.Fun.(*ast.Ident)
 				if ok {
-					if ident.Name == "append" {
-						printExpr(lh, buf, "", ctx)
-						buf.WriteString(".add(")
-						printExpr(rhTyped.Args[1], buf, "", ctx)
-						buf.WriteString(")")
-						// TODO: deal with ..., use 'addAll'
-						// TODO: deal with args[0] not being the RHS.
-						//   We would need to create an add inside of an add.
-						continue
-					} else if ident.Name == "make" {
-						printExpr(lh, buf, "", ctx)
-						buf.WriteString(tokenMap[st.Tok])
-						buf.WriteString("new ")
-						printExpr(rhTyped.Args[0], buf, "", ctx)
-						buf.WriteString("()")
-						continue
+					switch ident.Name {
+					case "append":
+						{
+							printExpr(lh, buf, "", ctx)
+							buf.WriteString(".add(")
+							printExpr(rhTyped.Args[1], buf, "", ctx)
+							buf.WriteString(")")
+							// TODO: deal with ..., use 'addAll'
+							// TODO: deal with args[0] not being the RHS.
+							//   We would need to create an add inside of an add.
+							continue
+						}
+					case "make":
+						{
+							printExpr(lh, buf, "", ctx)
+							buf.WriteString(tokenMap[st.Tok])
+
+							buf.WriteString("new ")
+							printExpr(rhTyped.Args[0], buf, "", ctx)
+							buf.WriteString("(")
+							for _, e := range rhTyped.Args[1:] {
+								printExpr(e, buf, "", ctx)
+							}
+
+							buf.WriteString(")")
+							continue
+						}
+					case "recover":
+						{
+							fmt.Println("do no support recovers yet.")
+							report(st)
+						}
 					}
 				}
 			}
@@ -745,6 +782,7 @@ func isMapIndex(lhTyped *ast.IndexExpr) bool {
 	return false
 }
 
+//TODO: Ranging over star expressions
 func printRangeStmt(r *ast.RangeStmt, buf *bytes.Buffer, indent string, ctx *LibraryContext) {
 	var idt *ast.Ident
 	switch rhs := r.X.(type) {
@@ -752,45 +790,67 @@ func printRangeStmt(r *ast.RangeStmt, buf *bytes.Buffer, indent string, ctx *Lib
 		idt = rhs.Sel
 	case *ast.Ident:
 		idt = rhs
-	}
 
-	ty := ctx.Types.Uses[idt].Type()
-	switch ty.(type) {
-	case *types.Slice:
-		buf.WriteString("for (int ")
-		printExpr(r.Key, buf, "", ctx)
-		buf.WriteString(" = 0; ")
-		printExpr(r.Key, buf, "", ctx)
-		buf.WriteString(" < ")
-		printExpr(r.X, buf, "", ctx)
-		buf.WriteString(".length; ")
-		printExpr(r.Key, buf, "", ctx)
-		buf.WriteString("++) {\n")
-		buf.WriteString(indent + "  ")
-		buf.WriteString("var ")
-		printExpr(r.Value, buf, "", ctx)
-		buf.WriteString(" = ")
-		printExpr(r.X, buf, "", ctx)
-		buf.WriteString("[")
-		printExpr(r.Key, buf, "", ctx)
-		buf.WriteString("];\n")
-		for _, stmt := range r.Body.List {
-			printStmt(stmt, buf, indent+"  ", ctx)
-		}
-		buf.WriteString(indent)
-		buf.WriteString("}\n")
-	case *types.Map:
-		printExpr(r.X, buf, indent, ctx)
-		buf.WriteString(".forEach( (")
-		printExpr(r.Key, buf, "", ctx)
-		buf.WriteString(", ")
-		printExpr(r.Value, buf, "", ctx)
-		buf.WriteString(") => ")
-		printStmt(r.Body, buf, "", ctx)
-		buf.WriteString(" );\n")
-
-	case *types.Chan:
+	case *ast.StarExpr: //99% sure this does not work. TODO
+		fmt.Println("Starexpr for range:")
 		report(r)
+		asIdt, ok := rhs.X.(*ast.Ident)
+		if ok {
+			idt = asIdt
+		} else {
+			report(r)
+			return
+		}
+	}
+	if use, ok := ctx.Types.Uses[idt]; ok {
+		ty := use.Type()
+		switch ty.(type) {
+		case *types.Slice:
+			buf.WriteString("for (int ")
+			printExpr(r.Key, buf, "", ctx)
+			buf.WriteString(" = 0; ")
+			printExpr(r.Key, buf, "", ctx)
+			buf.WriteString(" < ")
+			printExpr(r.X, buf, "", ctx)
+			buf.WriteString(".length; ")
+			printExpr(r.Key, buf, "", ctx)
+			buf.WriteString("++) {\n")
+			buf.WriteString(indent + "  ")
+			buf.WriteString("var ")
+			printExpr(r.Value, buf, "", ctx)
+			buf.WriteString(" = ")
+			printExpr(r.X, buf, "", ctx)
+			buf.WriteString("[")
+			printExpr(r.Key, buf, "", ctx)
+			buf.WriteString("];\n")
+			for _, stmt := range r.Body.List {
+				printStmt(stmt, buf, indent+"  ", ctx)
+			}
+			buf.WriteString(indent)
+			buf.WriteString("}\n")
+		case *types.Map:
+			printExpr(r.X, buf, indent, ctx)
+			buf.WriteString(".forEach( (")
+			printExpr(r.Key, buf, "", ctx)
+			buf.WriteString(", ")
+			printExpr(r.Value, buf, "", ctx)
+			buf.WriteString(") => ")
+			printStmt(r.Body, buf, "", ctx)
+			buf.WriteString(" );\n")
+
+		case *types.Chan:
+
+			report(r)
+			fmt.Println("Don't handle channels yet on range.")
+		default:
+			fmt.Println("Unhandled range type.", ty)
+			report(r.X)
+		}
+
+	} else {
+
+		report(r.X)
+		fmt.Println("Couldn't find type.")
 	}
 
 }
@@ -825,7 +885,8 @@ func printDecl(d ast.Decl, buf *bytes.Buffer, indent string, ctx *LibraryContext
 					buf.WriteString("{\n")
 					buf.WriteString("}")
 				default:
-					fmt.Printf("Unknown type in generic declaration printing: %s\n", reflect.TypeOf(ts.Type))
+					report(d)
+					//					fmt.Printf("Unknown type in generic declaration printing: %s\n", reflect.TypeOf(ts.Type))
 				}
 			}
 		case token.VAR, token.CONST:
@@ -860,38 +921,89 @@ func printDecl(d ast.Decl, buf *bytes.Buffer, indent string, ctx *LibraryContext
 	}
 }
 
-func transPackage(dir string) {
-	writeName := libName(dir)
+var transpiled map[string]bool
 
+func transpile(dir string) error {
 	defer func() {
-		if err := recover(); err != nil {
-			fmt.Println("Failed to transpile: " + dir)
-			ioutil.WriteFile(writeName, []byte(""), 0644)
-			//fmt.Fprintf(os.Stderr, "Exception: %v\n", err)
+		if r := recover(); r != nil {
+			fmt.Println("Recovered.")
 		}
 	}()
+	if transpiled == nil {
+		transpiled = make(map[string]bool)
+	}
+	writeName := libName(dir + ".dart")
+	fmt.Println("Transpiling: " + writeName)
+	switch writeName {
+	case "fmt.dart":
+		{
+			fmt.Println("using fmt")
+			return nil
+		}
+	}
 
-	files, err := ioutil.ReadDir(dir)
+	toWrite := []byte("")
+
+	lib, err := buildLibrary(dir)
 	if err != nil {
-		fmt.Printf("Failed to read dir: %s", err)
-		return
+		fmt.Println("Error building library.")
+		return err
+	}
+	toWrite = Print(lib)
+	outputFile(writeName, toWrite)
+	local_path := filepath.Join(os.Getenv("GOPATH"), "src")
+	std_path := "/usr/local/go/src"
+	for _, imp := range lib.Imports {
+		fpath := filepath.Join(std_path, stripchars(imp.Path.Value, "\"")) //hardcoded standard library location, TODO
+
+		if !exists(fpath) {
+			fmt.Println("Couldn't find ", fpath, " as standard library, trying locally.")
+			fpath = filepath.Join(local_path, stripchars(imp.Path.Value, "\""))
+			if imp.Path != nil && exists(fpath) && !transpiled[fpath] {
+				fmt.Println("Found ", fpath, " locally.")
+				transpiled[fpath] = true
+				defer transpile(fpath)
+			} else {
+				fmt.Println("Couldn't find ", fpath, " locally.")
+			}
+		} else if imp.Path != nil && !transpiled[fpath] {
+			fmt.Println("Found ", fpath, "as std lib.")
+			transpiled[fpath] = true
+			defer transpile(fpath)
+		} else {
+			//probably helpful message here.
+		}
+
+	}
+	fmt.Println("Successfully generated: " + dir + " with name " + writeName)
+	return nil
+
+}
+
+func buildLibrary(dir string) (*Library, error) {
+
+	file_names, err := getCompileFiles(dir)
+
+	if err != nil {
+		log.Fatal(err)
+		return nil, err
 	}
 
 	lib := NewLibrary()
-	parsed := make([]*ast.File, len(files))
+	parsed := make([]*ast.File, len(file_names))
 	count := 0
-	fset = token.NewFileSet()
-	for _, fi := range files {
-		if strings.Contains(fi.Name(), ".go") && !strings.Contains(fi.Name(), "_test") {
-			f, err := parser.ParseFile(fset, filepath.Join(dir, fi.Name()), nil, 0)
+	fset := token.NewFileSet()
+
+	for _, fi := range file_names {
+		if strings.HasSuffix(fi, ".go") {
+			f, err := parser.ParseFile(fset, filepath.Join(dir, fi), nil, 0)
 			if err == nil {
 				parsed[count] = f
 				count++
 			} else {
-				fmt.Println("Error in parsing: " + dir)
 				fmt.Fprintf(os.Stderr, "Exception: %v\n", err)
+				return nil, err
 			}
-
 		}
 	}
 
@@ -900,51 +1012,18 @@ func transPackage(dir string) {
 	cfg := &types.Config{}
 	_, err = cfg.Check(filepath.Base(dir), fset, parsed, info)
 	if err != nil {
-		fmt.Println(err)
-		return
+		//log.Fatal(err)
+		return nil, err
 	}
-	lib.Types = info
 
+	lib.Types = info
 	for _, f := range parsed {
 		LoadToLibrary(f, lib)
-		for _, imp := range f.Imports { //recursively resolve dependencies.
-			if imp.Path != nil {
-				path := filepath.Join("/usr/local/go/src", stripchars(imp.Path.Value, "\"")) //hardcoded is bad.
-				name := libName(path)
-				if !doesFileExist(name) {
-					defer transPackage(path)
-				}
-			}
-		}
 	}
 
-	ioutil.WriteFile(writeName, convert(lib), 0644)
-}
-
-func convert(lib *Library) []byte {
-	return Print(lib)
+	return lib, nil
 }
 
 func report(n ast.Node) {
-	pos := n.Pos()
-	fmt.Print("Problem at " + fset.Position(pos).String() + " with ")
-	fmt.Println(reflect.TypeOf(n))
-}
-
-func stripchars(str, chr string) string {
-	return strings.Map(func(r rune) rune {
-		if strings.IndexRune(chr, r) < 0 {
-			return r
-		}
-		return -1
-	}, str)
-}
-
-func libName(dir string) string {
-	return strings.Replace(dir, "/", "_", -1) + ".dart"
-}
-
-func doesFileExist(dir string) bool {
-	_, err := os.Stat(dir)
-	return err == nil
+	fmt.Println("Issue with", reflect.TypeOf(n))
 }
