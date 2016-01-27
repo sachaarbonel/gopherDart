@@ -10,11 +10,13 @@ import (
 	"go/token"
 	_ "golang.org/x/tools/go/gcimporter"
 	"golang.org/x/tools/go/types"
-	"log"
+	//"log"
 	"os"
 	//"path"
 	"path/filepath"
 	"reflect"
+	//"runtime/debug"
+	//"runtime/pprof"
 	"strconv"
 	"strings"
 )
@@ -65,7 +67,7 @@ func LoadToLibrary(f *ast.File, lib *Library) string {
 
 						lib.Classes[id.Name].Methods = append(lib.Classes[id.Name].Methods, d)
 					default:
-						fmt.Printf("Func declaration not being handled: %s\n", reflect.TypeOf(rt.Type))
+						//fmt.Printf("Func declaration not being handled: %s\n", reflect.TypeOf(rt.Type))
 					}
 				}
 				//d.Recv.List[0].Type
@@ -90,7 +92,7 @@ func LoadToLibrary(f *ast.File, lib *Library) string {
 					case *ast.InterfaceType:
 						lib.Interfaces = append(lib.Interfaces, d)
 					default:
-						fmt.Printf("Unknown type lib declaration: %s, %v\n", reflect.TypeOf(ts.Type), ts.Type)
+						//fmt.Printf("Unknown type lib declaration: %s, %v\n", reflect.TypeOf(ts.Type), ts.Type)
 					}
 				}
 			case token.VAR, token.CONST:
@@ -801,6 +803,11 @@ func printRangeStmt(r *ast.RangeStmt, buf *bytes.Buffer, indent string, ctx *Lib
 			report(r)
 			return
 		}
+	case *ast.CallExpr:
+		asIdt, ok := rhs.Fun.(*ast.Ident)
+		if ok {
+			idt = asIdt
+		}
 	}
 	if use, ok := ctx.Types.Uses[idt]; ok {
 		ty := use.Type()
@@ -828,7 +835,7 @@ func printRangeStmt(r *ast.RangeStmt, buf *bytes.Buffer, indent string, ctx *Lib
 			}
 			buf.WriteString(indent)
 			buf.WriteString("}\n")
-		case *types.Map:
+		case *types.Map: //TODO: don't use foreach
 			printExpr(r.X, buf, indent, ctx)
 			buf.WriteString(".forEach( (")
 			printExpr(r.Key, buf, "", ctx)
@@ -932,21 +939,21 @@ func transpile(dir string) error {
 	if transpiled == nil {
 		transpiled = make(map[string]bool)
 	}
-	writeName := libName(dir + ".dart")
+	writeName := libName(dir) + ".dart"
 	fmt.Println("Transpiling: " + writeName)
 	switch writeName {
 	case "fmt.dart":
 		{
-			fmt.Println("using fmt")
+			fmt.Println("\tusing fmt")
 			return nil
 		}
 	}
 
 	toWrite := []byte("")
 
-	lib, err := buildLibrary(dir)
+	lib, err := BuildLibrary(dir)
 	if err != nil {
-		fmt.Println("Error building library.")
+		fmt.Println("\tError building library: " + dir)
 		return err
 	}
 	toWrite = Print(lib)
@@ -957,17 +964,17 @@ func transpile(dir string) error {
 		fpath := filepath.Join(std_path, stripchars(imp.Path.Value, "\"")) //hardcoded standard library location, TODO
 
 		if !exists(fpath) {
-			fmt.Println("Couldn't find ", fpath, " as standard library, trying locally.")
+			//fmt.Println("Couldn't find ", fpath, " as standard library, trying locally.")
 			fpath = filepath.Join(local_path, stripchars(imp.Path.Value, "\""))
 			if imp.Path != nil && exists(fpath) && !transpiled[fpath] {
-				fmt.Println("Found ", fpath, " locally.")
+				//fmt.Println("Found ", fpath, " locally.")
 				transpiled[fpath] = true
 				defer transpile(fpath)
 			} else {
-				fmt.Println("Couldn't find ", fpath, " locally.")
+				//fmt.Println("Couldn't find ", fpath, " locally.")
 			}
 		} else if imp.Path != nil && !transpiled[fpath] {
-			fmt.Println("Found ", fpath, "as std lib.")
+			//fmt.Println("Found ", fpath, "as std lib.")
 			transpiled[fpath] = true
 			defer transpile(fpath)
 		} else {
@@ -980,12 +987,12 @@ func transpile(dir string) error {
 
 }
 
-func buildLibrary(dir string) (*Library, error) {
+func BuildLibrary(dir string) (*Library, error) {
 
 	file_names, err := getCompileFiles(dir)
 
 	if err != nil {
-		log.Fatal(err)
+		fmt.Println("\tError getting files.")
 		return nil, err
 	}
 
@@ -995,8 +1002,10 @@ func buildLibrary(dir string) (*Library, error) {
 	fset := token.NewFileSet()
 
 	for _, fi := range file_names {
-		if strings.HasSuffix(fi, ".go") {
-			f, err := parser.ParseFile(fset, filepath.Join(dir, fi), nil, 0)
+		if strings.HasSuffix(fi, ".go") && !strings.HasSuffix(fi, "_test.go") {
+			f, err := parser.ParseFile(fset, filepath.Join(dir, fi), nil, parser.ParseComments)
+			lib.CommentMap = append(lib.CommentMap, ast.NewCommentMap(fset, f, f.Comments))
+			lib.Files = append(lib.Files, fi)
 			if err == nil {
 				parsed[count] = f
 				count++
@@ -1008,12 +1017,21 @@ func buildLibrary(dir string) (*Library, error) {
 	}
 
 	parsed = parsed[:count]
+	old_dir, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+	err = os.Chdir(dir)
+	defer os.Chdir(old_dir)
 	info := &types.Info{Defs: make(map[*ast.Ident]types.Object), Uses: make(map[*ast.Ident]types.Object), Types: make(map[ast.Expr]types.TypeAndValue)}
 	cfg := &types.Config{}
+	cfg.Error = func(err error) {
+		//fmt.Println(err)
+	}
 	_, err = cfg.Check(filepath.Base(dir), fset, parsed, info)
 	if err != nil {
 		//log.Fatal(err)
-		return nil, err
+		//fmt.Println("\tType check error")
 	}
 
 	lib.Types = info
@@ -1021,9 +1039,11 @@ func buildLibrary(dir string) (*Library, error) {
 		LoadToLibrary(f, lib)
 	}
 
+	lib.Fset = fset
+
 	return lib, nil
 }
 
 func report(n ast.Node) {
-	fmt.Println("Issue with", reflect.TypeOf(n))
+	fmt.Println("\tIssue with", reflect.TypeOf(n))
 }
