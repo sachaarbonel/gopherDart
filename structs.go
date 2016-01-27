@@ -2,6 +2,7 @@ package main
 
 import (
 	"go/ast"
+	"go/token"
 	"golang.org/x/tools/go/types"
 )
 
@@ -15,6 +16,9 @@ type Library struct {
 	Vars       []*ast.GenDecl
 	Types      *types.Info
 	Imports    []*ast.ImportSpec
+	Files      []string
+	CommentMap []ast.CommentMap
+	Fset       *token.FileSet
 }
 
 func NewLibrary() *Library {
