@@ -3,7 +3,7 @@ package main
 import (
 	"go/ast"
 	"go/token"
-	"golang.org/x/tools/go/types"
+	"go/types"
 )
 
 // Library represents a collection of classes, variables, and functions.

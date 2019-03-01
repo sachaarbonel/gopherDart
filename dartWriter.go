@@ -3,18 +3,22 @@ package main
 import (
 	"bytes"
 	"fmt"
+
 	//"github.com/lologarithm/gopherDart/structs"
 	//"errors"
 	"go/ast"
 	"go/parser"
 	"go/token"
-	_ "golang.org/x/tools/go/gcimporter"
-	"golang.org/x/tools/go/types"
+	"go/types"
+
+	_ "golang.org/x/tools/go/gcexportdata"
+
 	//"log"
 	"os"
 	//"path"
 	"path/filepath"
 	"reflect"
+
 	//"runtime/debug"
 	//"runtime/pprof"
 	"strconv"
