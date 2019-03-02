@@ -2,30 +2,26 @@
 package main
 
 import (
-	"io/ioutil"
-	"log"
 	"os"
-	"os/exec"
-	"path"
 	"path/filepath"
 )
 
 func main() {
 	dir := os.Args[1]
-	err := RemoveContents("lib")
-	if err != nil {
-		log.Fatal(err)
-	}
+	// err := RemoveContents("lib")
+	// if err != nil {
+	// 	log.Fatal(err)
+	// }
 	transpile(dir)
 
-	files, err := ioutil.ReadDir("standlib")
-	if err != nil {
-		log.Fatal(err)
-	}
+	// files, err := ioutil.ReadDir("standlib")
+	// if err != nil {
+	// 	log.Fatal(err)
+	// }
 
-	for _, f := range files {
-		exec.Command("cp", "standlib/"+f.Name(), path.Join(dir, "lib")).Run()
-	}
+	// for _, f := range files {
+	// 	exec.Command("cp", "standlib/"+f.Name(), path.Join(dir, "lib")).Run()
+	// }
 
 }
 
