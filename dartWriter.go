@@ -123,12 +123,12 @@ func Print(lib *Library) []byte {
 	buf.WriteString("\n\n")
 	for _, imp := range lib.Imports {
 
-		path := filepath.Join("/usr/local/go/src", stripchars(imp.Path.Value, "\""))
+		path := filepath.Join("~/go/src", stripchars(imp.Path.Value, "\""))
 		name := libName(path)
 		buf.WriteString("import '" + name + ".dart' as " + name + ";\n")
 	}
 
-	buf.WriteString("import 'ListSlice.dart';\n") // just have everyone import listslice.
+	//buf.WriteString("import 'ListSlice.dart';\n") // just have everyone import listslice.
 
 	ctx := &LibraryContext{
 		Name:        lib.Name,
@@ -340,7 +340,8 @@ func printExpr(e ast.Expr, buf *bytes.Buffer, indent string, ctx *LibraryContext
 				break
 			} else if ident.Name == "copy" {
 				printExpr(et.Args[0], buf, "", ctx)
-				buf.WriteString(".copy(")
+				buf.WriteString("=")
+				buf.WriteString("List.from(")
 				printExpr(et.Args[1], buf, "", ctx)
 				buf.WriteString(")")
 				break
