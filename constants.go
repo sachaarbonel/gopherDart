@@ -53,4 +53,7 @@ var tokenMap = map[token.Token]string{
 	token.OR:         "|",
 	token.SUB:        "-",
 	token.SUB_ASSIGN: "-=",
+	token.REM:        "%",
+	token.SHR:        ">>",
+	token.SHL:        "<<",
 }
