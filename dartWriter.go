@@ -412,7 +412,7 @@ func printExpr(e ast.Expr, buf *bytes.Buffer, indent string, ctx *LibraryContext
 			report(e) //failed to find idt in types list
 		}
 	case *ast.ArrayType:
-		buf.WriteString("ListSlice")
+		buf.WriteString("List")
 	case *ast.SliceExpr:
 		printExpr(et.X, buf, "", ctx)
 		buf.WriteString(".slice(")
@@ -702,11 +702,11 @@ func printAssignStmt(st *ast.AssignStmt, buf *bytes.Buffer, indent string, ctx *
 					printExpr(st.Rhs[idx], buf, "", ctx)
 				} else {
 					printExpr(lhTyped.X, buf, "", ctx)
-					buf.WriteString(".setAt(")
+					buf.WriteString("[")
 					printExpr(lhTyped.Index, buf, "", ctx)
-					buf.WriteString(",")
+					buf.WriteString("]")
+					buf.WriteString("=")
 					printExpr(st.Rhs[idx], buf, "", ctx)
-					buf.WriteString(")")
 				}
 				continue
 			}
