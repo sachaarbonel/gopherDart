@@ -416,7 +416,7 @@ func printExpr(e ast.Expr, buf *bytes.Buffer, indent string, ctx *LibraryContext
 		buf.WriteString("List")
 	case *ast.SliceExpr:
 		printExpr(et.X, buf, "", ctx)
-		buf.WriteString(".slice(")
+		buf.WriteString(".sublist(")
 		printExpr(et.Low, buf, "", ctx)
 		buf.WriteString(",")
 		printExpr(et.High, buf, "", ctx)
