@@ -1,5 +1,3 @@
-This repo has moved to: https://github.com/Workiva/GopherDart
-
 # gopherDart
 Go to Dart transpiler
 
@@ -57,6 +55,5 @@ Basically GopherJs, except with Dart.
 #TODO
 Figure out how to deal with conditional compilation commands.
 Fix the millions of nil dereferences.
-
 Probably should do major refactor for posterity.
-
+There are issues with double for loop, for range and switch
